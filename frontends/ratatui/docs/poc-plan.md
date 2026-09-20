@@ -420,7 +420,29 @@ git commit -m "feat(ratatui): Content-Length framing and JSON-RPC envelope"
 
 ---
 
-### Task 3: Spawn the child and own the terminal
+### Task 3: Spawn the child and own the terminal — **DONE**
+
+Completed 2026-09-20. Two deviations from the plan as written:
+
+- `lem-ratatui` needed `serde_json` added as a direct dependency; it was
+  only a dependency of `lem-protocol`. The plan's Files block did not
+  mention it.
+- The smoke test's stop condition was a fixed message count, which hangs:
+  the editor emits frames forever (cursor blink, modeline clock). Changed
+  to stop on the first `bulk` containing `update-display` — see
+  [protocol-notes](../protocol-notes.md) section 14. Task 6's draw trigger
+  is the same condition.
+
+**Verified:** against the real editor, the first complete frame arrives
+after 2 notifications with 18 instructions, matching the fixture exactly.
+The child's stderr log is empty — no protocol leaked. Under a real pty,
+raw mode is entered and then ICANON and ECHO are restored, the alternate
+screen is left and the cursor shown, with exit status 0. That is ADR
+0004's terminal-restoration claim verified rather than assumed.
+
+Original plan text follows.
+
+### Task 3 (as planned): Spawn the child and own the terminal
 
 **Files:**
 - Create: `rust/crates/lem-ratatui/src/child.rs`
