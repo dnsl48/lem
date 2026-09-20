@@ -14,16 +14,29 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use anyhow::{Context, Result};
 use lem_protocol::{framing, rpc::Incoming};
 
-/// A running Lem process, addressed as a stream of protocol messages.
+/// A running Lem process. Killed and reaped when dropped.
+///
+/// Reading and writing are split off so the reader can move onto its own
+/// thread while the main loop keeps the writer: the display half has to
+/// wait on terminal events and protocol frames at the same time, and
+/// `recv` blocks.
 pub struct Lem {
     child: Child,
-    stdin: BufWriter<ChildStdin>,
+}
+
+/// The protocol stream coming from Lem.
+pub struct LemReader {
     stdout: BufReader<ChildStdout>,
+}
+
+/// The protocol stream going to Lem.
+pub struct LemWriter {
+    stdin: BufWriter<ChildStdin>,
 }
 
 impl Lem {
     /// Spawn `program`, piping its stdio and redirecting its stderr to `log`.
-    pub fn spawn(program: &Path, log: &Path) -> Result<Self> {
+    pub fn spawn(program: &Path, log: &Path) -> Result<(Self, LemReader, LemWriter)> {
         let stderr =
             File::create(log).with_context(|| format!("creating log file {}", log.display()))?;
         let mut child = Command::new(program)
@@ -34,19 +47,19 @@ impl Lem {
             .with_context(|| format!("spawning {}", program.display()))?;
         let stdin = child.stdin.take().context("child stdin was not piped")?;
         let stdout = child.stdout.take().context("child stdout was not piped")?;
-        Ok(Self {
-            child,
-            stdin: BufWriter::new(stdin),
-            stdout: BufReader::new(stdout),
-        })
+        Ok((
+            Self { child },
+            LemReader {
+                stdout: BufReader::new(stdout),
+            },
+            LemWriter {
+                stdin: BufWriter::new(stdin),
+            },
+        ))
     }
+}
 
-    /// Send one already-serialised message.
-    pub fn send(&mut self, body: &[u8]) -> Result<()> {
-        framing::write_message(&mut self.stdin, body)?;
-        Ok(())
-    }
-
+impl LemReader {
     /// Read the next message. `Ok(None)` means Lem exited.
     pub fn recv(&mut self) -> Result<Option<Incoming>> {
         let Some(body) = framing::read_message(&mut self.stdout)? else {
@@ -60,6 +73,14 @@ impl Lem {
             )
         })?;
         Ok(Some(incoming))
+    }
+}
+
+impl LemWriter {
+    /// Send one already-serialised message.
+    pub fn send(&mut self, body: &[u8]) -> Result<()> {
+        framing::write_message(&mut self.stdin, body)?;
+        Ok(())
     }
 }
 
