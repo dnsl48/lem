@@ -23,6 +23,13 @@ explicit output stream is the right fix and should be proposed upstream;
 until then this duplicates its three lines."
   (call-with-protocol-streams
    (lambda ()
+     ;; lem-server enables a tabbar after init, and it is an html header
+     ;; window. A terminal cannot paint html, so it would sit there as two
+     ;; blank rows taken off the top of every buffer. Turned off by
+     ;; default; `*after-init-hook*' runs after the user's init file, so
+     ;; setting it back to T there still works — it just renders nothing
+     ;; until a terminal-native tabbar exists.
+     (setf lem/tabbar:*enable-tabbar-on-startup* nil)
      (let ((lem-server::*server-runner* (make-instance 'stdio-runner)))
        (lem-server::init)
        (apply #'lem:lem (append args (list "--interface" "RATATUI")))))))
