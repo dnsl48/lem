@@ -1713,7 +1713,35 @@ git commit -m "feat(ratatui): translate crossterm key events into Lem input"
 
 ---
 
-### Task 8: Resize
+### Task 8: Resize — **DONE**
+
+Completed 2026-09-20. 50 tests, gates clean.
+
+**A bug this task had to fix first:** the display half was reporting a
+hardcoded 80x24 at `login` regardless of the real terminal, so every
+frame was laid out for the wrong screen on any terminal that was not
+exactly that size. It now queries `crossterm::terminal::size()` when
+interactive and falls back to 80x24 only when headless — which is also
+the geometry the committed fixture was captured at.
+
+`Event::Resize` sends `redraw` with the new size; Lem answers with
+`resize-view` and `move-view` per window, which the registry already
+applies (Task 4). The plan's suggested `reinserting_a_view_resizes_its_buffer`
+test is redundant — `resize_reallocates_the_buffer` covers it.
+
+**Verified** by driving a pty and issuing `TIOCSWINSZ` plus `SIGWINCH`
+mid-session: growing 60 to 100 columns paints out to column 100,
+shrinking 100 to 60 paints to column 60, with a full repaint of the
+dashboard, logo, lock emoji and modeline each time.
+
+**Two bad measurements worth not repeating.** Taking the column from
+`ESC[N;1H` cursor moves always yields 1, because content is written after
+the move without re-addressing; width has to be reconstructed by adding
+run lengths. And a control that does not change size paints nothing at
+all — the diff is empty — so "no output" proves nothing. Compare a grow
+against a shrink instead.
+
+### Task 8 (as planned): Resize
 
 **Files:**
 - Modify: `rust/crates/lem-ratatui/src/main.rs`
