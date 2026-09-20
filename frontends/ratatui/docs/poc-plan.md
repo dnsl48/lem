@@ -574,25 +574,45 @@ fn main() -> Result<()> {
     let program = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("./lem-ratatui-lisp"));
+        .unwrap_or_else(|| PathBuf::from("../lem-ratatui-lisp"));
     let log = PathBuf::from("/tmp/lem-ratatui.log");
 
     let mut lem = child::Lem::spawn(&program, &log)?;
-    let body = lem_protocol::rpc::request(
+
+    // Both halves of the handshake are mandatory. Colours must be non-nil
+    // or the editor's unbound colour slots make every update-display throw
+    // and it emits nothing, forever; and the login *response* must be
+    // followed by `redraw` before any frame arrives. See
+    // docs/protocol-notes.md section 11.
+    lem.send(&lem_protocol::rpc::request(
         1,
         "login",
-        serde_json::json!({"size": {"width": 80, "height": 24}}),
-    )?;
-    lem.send(&body)?;
+        serde_json::json!({
+            "size": {"width": 80, "height": 24},
+            "foreground": "#DDDDDD",
+            "background": "#111111"
+        }),
+    )?)?;
 
     let mut frames = 0usize;
-    while let Some(_incoming) = lem.recv()? {
+    let mut logged_in = false;
+    while let Some(incoming) = lem.recv()? {
+        if !logged_in {
+            if let lem_protocol::rpc::Incoming::Response { .. } = incoming {
+                logged_in = true;
+                lem.send(&lem_protocol::rpc::notification(
+                    "redraw",
+                    serde_json::json!({"size": {"width": 80, "height": 24}}),
+                )?)?;
+                continue;
+            }
+        }
         frames += 1;
         if frames >= 5 {
             break;
         }
     }
-    eprintln!("received {frames} messages");
+    eprintln!("received {frames} messages after login");
     Ok(())
 }
 ```
@@ -600,11 +620,17 @@ fn main() -> Result<()> {
 - [ ] **Step 4: Verify against the real Lisp half**
 
 ```bash
-cargo run -p lem-ratatui -- ../../../../lem-ratatui-lisp
+LEM_HOME=/tmp/lem-scratch/ cargo run -p lem-ratatui -- ../lem-ratatui-lisp
 ```
 
-Expected: `received 5 messages`, and `/tmp/lem-ratatui.log` contains no
-protocol JSON (if it does, stdout muffling in Task 1 is incomplete).
+`LEM_HOME` needs the trailing slash, and pointing it at a scratch
+directory avoids the startup config-migration prompt that would otherwise
+block the editor (Global Constraints).
+
+Expected: `received 5 messages after login`, and `/tmp/lem-ratatui.log`
+contains no protocol JSON. If it does, stdout muffling is incomplete; if
+no messages arrive at all, check `<LEM_HOME>/debug.log` rather than
+stderr.
 
 - [ ] **Step 5: Commit**
 
@@ -1141,6 +1167,8 @@ pub enum Instruction {
     ClearEol(Clear),
     ClearEob(Clear),
     MoveCursor(MoveCursor),
+    ResizeView(View),
+    MoveView(View),
     /// A method this display half does not implement.
     Other { method: String },
 }
@@ -1172,6 +1200,10 @@ impl RawInstruction {
             "clear-eol" => Instruction::ClearEol(serde_json::from_value(self.argument)?),
             "clear-eob" => Instruction::ClearEob(serde_json::from_value(self.argument)?),
             "move-cursor" => Instruction::MoveCursor(serde_json::from_value(self.argument)?),
+            "resize-view" => Instruction::ResizeView(serde_json::from_value(self.argument)?),
+            "move-view" => Instruction::MoveView(serde_json::from_value(self.argument)?),
+            // redraw-view-after and change-view carry nothing a terminal
+            // acts on, and fall through to Other deliberately.
             _ => Instruction::Other { method: self.method },
         })
     }
@@ -1190,7 +1222,11 @@ use lem_protocol::{Bulk, Instruction};
 #[test]
 fn every_message_in_the_captured_frame_decodes() {
     let raw = include_str!("fixtures/frame.jsonl");
+    // Counts are from the committed capture: a fresh 80x24 editor after
+    // login + redraw. They are exact rather than `> 0` so a decoding
+    // regression that silently drops a variant is caught.
     let mut puts = 0usize;
+    let mut modeline_puts = 0usize;
     let mut views = 0usize;
 
     for line in raw.lines().filter(|l| !l.trim().is_empty()) {
@@ -1202,14 +1238,16 @@ fn every_message_in_the_captured_frame_decodes() {
         for raw_instruction in bulk {
             match raw_instruction.parse().unwrap() {
                 Instruction::Put(_) => puts += 1,
+                Instruction::ModelinePut(_) => modeline_puts += 1,
                 Instruction::MakeView(_) => views += 1,
                 _ => {}
             }
         }
     }
 
-    assert!(views > 0, "expected at least one make-view in the capture");
-    assert!(puts > 0, "expected at least one put in the capture");
+    assert_eq!(views, 2, "make-view");
+    assert_eq!(puts, 21, "put");
+    assert_eq!(modeline_puts, 59, "modeline-put");
 }
 ```
 
@@ -1262,6 +1300,9 @@ fn apply_frame(registry: &mut Registry, bulk: Bulk) {
                     paint::clear_eob(vb, c.y);
                 }
             }
+            // Lem re-sends geometry on resize; insert replaces the view
+            // and reallocates its buffer at the new size (Task 8).
+            Instruction::ResizeView(view) | Instruction::MoveView(view) => registry.insert(view),
             Instruction::MoveCursor(_) | Instruction::Other { .. } => {}
         }
     }
