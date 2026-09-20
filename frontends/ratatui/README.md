@@ -102,6 +102,7 @@ Verified against a real editor under a pty:
 | Splits | `C-x 3` and `C-x 2` render with `│` separators, nested |
 | UTF-8 input | `café naïve 日本語 🔥 żółć` round-trips byte-exact |
 | Completion popups | composite over the buffer, borderless as the browser draws them |
+| Clipboard | `M-w` copies to the system clipboard, `C-y` pastes from it |
 
 Window splits get a `│` separator in the column Lem reserves through
 `:window-left-margin`, spanning the modeline row — matching the browser
@@ -110,6 +111,23 @@ modeline already delimits it.
 
 Wide characters work — Lem's startup modeline contains U+1F512, and
 `ratatui-core`'s buffer advances by display width.
+
+## Clipboard
+
+`M-w` and `C-y` use the system clipboard through `arboard`. Lem waits only
+0.1s for a paste to be answered, so the read happens inline rather than on
+a thread.
+
+Two caveats, neither ours to fix:
+
+- On X11 the clipboard is served by the process that owns it, so text
+  copied out of Lem is gone once Lem exits. That is how X11 works.
+- With no display server — SSH without forwarding, a container —
+  initialisation fails, a line is logged, and copy and paste do nothing
+  rather than erroring.
+
+`cargo run -p lem-ratatui --example clip -- get|hold TEXT` is a helper for
+testing either direction.
 
 ## Performance
 
@@ -164,9 +182,6 @@ Nothing here is required for the PoC; each is its own piece of work.
   PoC completion as an explicit trigger to revisit.
 - **Report the three jsonrpc stdio defects upstream**, and the two
   `lem-server` handshake traps.
-- **Clipboard** — `clipboard-paste` dequeues with a 0.1s timeout, so an
-  unanswered `get-clipboard-text` costs a stall and pastes nothing rather
-  than hanging. Answering it needs OSC 52 or a crate like `arboard`.
 - **Mouse, images, popup menus** — stubbed `lem-if` methods. Mouse
   capture being off means terminal-native selection still works.
 - **`update-cursor-shape`** — no bar or underline cursor styles.
