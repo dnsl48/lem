@@ -47,6 +47,45 @@ fn blit(screen: &mut Buffer, source: &Buffer, x: u16, y: u16, area: Rect) {
     }
 }
 
+/// Drawn in the column Lem reserves to the left of each split.
+const SEPARATOR: &str = "\u{2502}";
+
+/// Copy one view and its modeline onto the screen.
+fn blit_view(screen: &mut Buffer, vb: &ViewBuffer, area: Rect) {
+    blit(screen, &vb.buffer, vb.view.x, vb.view.y, area);
+    if vb.view.has_modeline() {
+        // One row immediately below the view, not its last row.
+        let y = vb.view.y.saturating_add(vb.view.height);
+        blit(screen, &vb.modeline, vb.view.x, y, area);
+    }
+}
+
+/// Draw the separator to the left of a split.
+///
+/// Lem reserves the column through `:window-left-margin`, and the browser
+/// client draws its `VerticalBorder` there — half a cell left of the
+/// view's origin, which in a terminal is the cell at `x - 1`. A view at
+/// x = 0 has nothing to its left and gets none. The line spans the
+/// modeline row too, matching `height + (useModeline ? 1 : 0)`.
+fn draw_separator(screen: &mut Buffer, view: &View, area: Rect) {
+    let Some(x) = view.x.checked_sub(1) else {
+        return;
+    };
+    if x >= area.width {
+        return;
+    }
+    let rows = view.height + u16::from(view.has_modeline());
+    for row in 0..rows {
+        let Some(y) = view.y.checked_add(row) else {
+            return;
+        };
+        if y >= area.height {
+            return;
+        }
+        screen[(x, y)].set_symbol(SEPARATOR);
+    }
+}
+
 /// Painting order. Tiles are the background, floating windows the top.
 fn layer(kind: ViewKind) -> u8 {
     match kind {
@@ -123,13 +162,21 @@ impl Registry {
         ordered.sort_by_key(|vb| layer(vb.view.kind));
 
         let area = screen.area;
-        for vb in ordered {
-            blit(screen, &vb.buffer, vb.view.x, vb.view.y, area);
-            if vb.view.has_modeline() {
-                // One row immediately below the view, not its last row.
-                let y = vb.view.y.saturating_add(vb.view.height);
-                blit(screen, &vb.modeline, vb.view.x, y, area);
-            }
+
+        // Separators go on after every tile is painted, so a neighbour
+        // cannot overwrite one — and before headers and floating windows,
+        // which should cover them.
+        let (tiles, above): (Vec<_>, Vec<_>) = ordered
+            .into_iter()
+            .partition(|vb| vb.view.kind == ViewKind::Tile);
+        for vb in &tiles {
+            blit_view(screen, vb, area);
+        }
+        for vb in &tiles {
+            draw_separator(screen, &vb.view, area);
+        }
+        for vb in &above {
+            blit_view(screen, vb, area);
         }
     }
 }
@@ -272,6 +319,62 @@ mod tests {
         registry.composite(&mut screen);
         assert_eq!(screen[(0, 0)].symbol(), "b");
         assert_eq!(screen[(0, 1)].symbol(), " ", "no modeline painted");
+    }
+
+    #[test]
+    fn a_split_gets_a_separator_in_its_reserved_column() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 4, 2, ViewKind::Tile));
+        let mut right = view(2, 6, 0, 4, 2, ViewKind::Tile);
+        right.use_modeline = Some(true);
+        registry.insert(right);
+        fill(&mut registry, 1, 'l');
+        fill(&mut registry, 2, 'r');
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 12, 4));
+        registry.composite(&mut screen);
+
+        assert_eq!(screen[(5, 0)].symbol(), "\u{2502}", "separator column");
+        assert_eq!(screen[(5, 1)].symbol(), "\u{2502}");
+        assert_eq!(
+            screen[(5, 2)].symbol(),
+            "\u{2502}",
+            "spans the modeline row"
+        );
+        assert_eq!(screen[(6, 0)].symbol(), "r", "view content untouched");
+        assert_eq!(screen[(3, 0)].symbol(), "l", "left pane untouched");
+    }
+
+    #[test]
+    fn a_view_at_the_left_edge_has_no_separator() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 4, 2, ViewKind::Tile));
+        fill(&mut registry, 1, 'l');
+        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
+        registry.composite(&mut screen);
+        assert_eq!(
+            screen[(0, 0)].symbol(),
+            "l",
+            "nothing to the left to draw in"
+        );
+    }
+
+    #[test]
+    fn floating_windows_cover_separators() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 3, 0, 4, 2, ViewKind::Tile));
+        registry.insert(view(2, 0, 0, 6, 1, ViewKind::Floating));
+        fill(&mut registry, 1, 't');
+        fill(&mut registry, 2, 'f');
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 2));
+        registry.composite(&mut screen);
+        assert_eq!(
+            screen[(2, 0)].symbol(),
+            "f",
+            "floating wins over the separator"
+        );
+        assert_eq!(screen[(2, 1)].symbol(), "\u{2502}", "still drawn below it");
     }
 
     #[test]
