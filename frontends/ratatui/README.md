@@ -127,11 +127,19 @@ Lem is quiet when idle. One keystroke producing a dozen frames is the
 cost worth attacking, and `render-line-on-modeline` repainting the whole
 modeline unconditionally every frame was a large part of it.
 
-`lisp/modeline.lisp` memoises it — sending the modeline only when it
-differs from the last one sent. On a fixed workload that cut total wire
-traffic by **54%** and average frame size by **46%**, with no change to
-`lem-server` and no monkey-patching: both hooks are generic functions,
-so specialising on our own implementation class is ordinary extension.
+Two optimisations live in `lisp/`, both specialising on our own
+implementation class — no change to `lem-server`, no patching:
+
+- `modeline.lisp` sends the modeline only when it differs from the last
+  one sent. `lem-server` repaints it in full every frame with no caching.
+- `frame.lisp` drops a frame that changes nothing. Most frames were
+  `clear-eob` re-blanking an already-blank region, which `redraw-lines`
+  emits on every redraw where the buffer does not fill the window.
+
+| fixed workload | baseline | both |
+|---|---|---|
+| frames | 535 | **130** (−76%) |
+| total bytes | 1,635,547 | **639,265** (−61%) |
 
 ## Acceptance
 

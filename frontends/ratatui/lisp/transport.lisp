@@ -4,6 +4,7 @@
            :*protocol-output*
            :*debug*
            :debug-log
+           :*log-stream*
            :start-debug-watchdog
            :*backtrace-delay*
            :stdio-runner
@@ -38,11 +39,20 @@ the image.
 Diagnostics go to stderr, which the display half captures as a log;
 stdout is the wire and can never be used for this.")
 
+(defvar *log-stream* nil
+  "The process's real stderr, captured before anything rebinds it.
+
+`*error-output*' cannot be used directly: most of our code runs on the
+editor thread, which `run-editor-thread' wraps in `with-editor-stream',
+and that rebinds the standard streams. Diagnostics written there vanish
+into the editor rather than reaching the log the display half captures.")
+
 (defun debug-log (control &rest arguments)
-  "Write a diagnostic line to stderr when `*debug*' is on."
+  "Write a diagnostic line to the real stderr when `*debug*' is on."
   (when *debug*
-    (format *error-output* "~&[lem-ratatui] ~?~%" control arguments)
-    (force-output *error-output*)))
+    (let ((stream (or *log-stream* *error-output*)))
+      (format stream "~&[lem-ratatui] ~?~%" control arguments)
+      (force-output stream))))
 
 (defclass stdio-runner (lem-server::server-runner)
   ()
@@ -120,7 +130,8 @@ The debugger is disabled outright as well. A protocol child has no one to
 answer its prompts, and dying on error is the behaviour the display half
 wants: it sees EOF and restores the terminal."
   (sb-ext:disable-debugger)
-  (setf *debug* (and (uiop:getenv "LEM_RATATUI_DEBUG") t)
+  (setf *log-stream* *error-output*
+        *debug* (and (uiop:getenv "LEM_RATATUI_DEBUG") t)
         *backtrace-delay* (let ((raw (uiop:getenv "LEM_RATATUI_BACKTRACE")))
                             (and raw (ignore-errors (parse-integer raw)))))
   (let* ((sink (make-broadcast-stream))
