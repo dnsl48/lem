@@ -3,9 +3,11 @@
 A terminal frontend for Lem built on `crossterm`, reusing the JSON-RPC
 display protocol that already drives the browser and webview frontends.
 
-> **Status: scaffold.** The design is settled and written down; nothing is
-> implemented. `cargo test` passes and the Lisp half is a capability
-> subclass plus an entry point. There is no working editor here yet.
+> **Status: working PoC.** Opens files, edits them, renders syntax
+> colours, reflows on resize and leaves the terminal clean on exit — all
+> eight acceptance checks in [`docs/poc-plan.md`](docs/poc-plan.md) pass.
+> Single window only: no popups, mouse, clipboard or images. See
+> **Known gaps** below for what is deliberately absent.
 
 ## Shape
 
@@ -61,7 +63,7 @@ docs/
 ## Building
 
 ```bash
-cd rust && cargo test                    # Rust half
+cd rust && cargo test                    # Rust half (53 tests)
 
 # Lisp half: build, then drive it by hand
 qlot install
@@ -83,25 +85,52 @@ There is deliberately no `make ratatui` target and no `lem.asd`
 registration yet — neither is useful until the display half does
 something.
 
+## What it does
+
+Verified against a real editor under a pty:
+
+| | |
+|---|---|
+| Startup screen and modeline | renders |
+| `C-x C-f` | opens a file; the minibuffer prompt composites over the buffer |
+| Syntax colours | 13 distinct truecolor foregrounds on Lisp source |
+| Cursor keys | `abc`, Left, Left, `X` writes `aXbc` |
+| Typing and undo | text inserts; `C-x u` reverts it |
+| Resize | 60→100 columns paints to 100, 100→60 paints to 60 |
+| `C-x C-c` | exits 0, raw mode and the alternate screen released |
+| Killing Lem | the display half exits 0 and still restores the terminal |
+
+Wide characters work — Lem's startup modeline contains U+1F512, and
+`ratatui-core`'s buffer advances by display width.
+
+## Performance
+
+One realistic release-build session (open, type, move, resize twice,
+save, quit):
+
+```
+960 frames, 3,006,287 B total, avg 3,131 B, max 17,234 B, avg decode 68us
+```
+
+Decoding is 0.4% of a 16.7ms frame budget, which is why
+[`docs/adr/0003`](docs/adr/0003-keep-json-codec-for-now.md) keeps JSON.
+The notable number is the *idle* frame rate — roughly 38 frames a second
+with nothing happening, because cursor blink and the modeline clock each
+emit one. Not sending unchanged frames would beat every byte-level lever
+in that record.
+
 ## Next steps
 
-The PoC's success criterion: *open a file, move the cursor, type, see
-syntax colours, resize the terminal.* Single window; no popups, images,
-mouse or clipboard — all of those are `lem-if` methods that can stay
-stubbed.
+Nothing here is required for the PoC; each is its own piece of work.
 
-1. stdio transport: spawn Lem, read `Content-Length`-framed JSON-RPC
-2. `login` with terminal size and colours; handle `bulk`
-3. one `Buffer` per view, composited in z-order on `update-display`
-4. crossterm events translated to Lem key encodings, sent as `input`
-5. instrument bytes and encode time per frame, so
-   [`docs/adr/0003`](docs/adr/0003-keep-json-codec-for-now.md) can be
-   revisited against numbers rather than estimates
-
-Step 3 has no equivalent in the browser half and is where the real
-unknowns are: a terminal has one grid, composites nothing, and gets no
-occlusion repair for free. See
-[`docs/protocol-notes.md`](docs/protocol-notes.md) section 7.
+- **Reconsider ownership of the Lisp half** —
+  [`docs/adr/0006`](docs/adr/0006-stay-on-lem-server-for-now.md) names
+  PoC completion as an explicit trigger to revisit.
+- **Report the three jsonrpc stdio defects upstream**, and the two
+  `lem-server` handshake traps.
+- **Popups, mouse, clipboard, images** — all stubbed `lem-if` methods.
+- **Cursor shape and position** — `move-cursor` is currently ignored; the
+  cursor renders only as Lem's own reverse-video cell.
 
 ## Known gaps in the scaffold
 
