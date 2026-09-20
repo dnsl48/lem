@@ -1205,7 +1205,36 @@ git commit -m "feat(ratatui): paint put and clear commands into view buffers"
 
 ---
 
-### Task 6: Apply whole frames and draw
+### Task 6: Apply whole frames and draw — **DONE**
+
+Completed 2026-09-20. **Lem renders in a terminal.** 40 tests, gates clean.
+
+Verified under a pty: the dashboard text (`*dashboard*`, `Welcome`,
+`DashboardTop`), the modeline (`*tmp*`, `Fundamental`, `All`), the
+working-directory path, the U+1F512 lock emoji, and truecolor —
+`ESC[38;2;255;255;255;48;2;64;64;64m` and friends, matching the
+attributes in the capture exactly, plus `ESC[1m`/`ESC[22m` for bold.
+
+**Three things that cost time, all worth knowing for Task 10:**
+
+- **`Frame`'s buffer is `pub(crate)`.** There is no `buffer_mut()`; the
+  only way in is the `Widget` trait. `impl Widget for &Registry` calling
+  `composite` is the whole adapter. Note this means the frontend *does*
+  use one piece of Ratatui's widget system — the trait, not the widget
+  library. ADR 0002's reasoning is unaffected, but its phrasing that we
+  "use none of it" is too strong.
+- **A pty created without `TIOCSWINSZ` is 0x0**, so every cell clips away
+  and the diff emits nothing but style resets. Any harness that drives the
+  binary must set the window size explicitly.
+- **crossterm combines foreground and background into one SGR sequence**
+  (`38;2;r;g;b;48;2;r;g;b`). A check for `\x1b\[38;2;...m` finds nothing
+  and looks like missing colour when the colour is fine.
+
+Also fixed: `let mut terminal = match _guard { Some(_) => ... }` *moves*
+the guard, dropping it — and restoring the terminal — before the first
+frame is drawn. Matched by reference instead.
+
+### Task 6 (as planned): Apply whole frames and draw
 
 **Files:**
 - Modify: `rust/crates/lem-protocol/src/lib.rs` (extend `Instruction`)

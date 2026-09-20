@@ -2,26 +2,77 @@
 //!
 //! This process owns the terminal. It spawns Lem as a child speaking the
 //! `lem-server` JSON-RPC protocol over stdio, paints the frames it is
-//! sent into a cell buffer, and sends key and mouse events back.
+//! sent into per-view cell buffers, composites them, and draws.
 //!
-//! Status: transport and terminal lifecycle only. Frames are counted, not
-//! yet painted — that is Task 6 in `../../../docs/poc-plan.md`.
+//! Status: rendering only. Input is Task 7 in `../../../docs/poc-plan.md`.
 
 mod child;
 mod paint;
 mod term;
 mod views;
 
+use std::io;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use lem_protocol::rpc::{self, Incoming};
+use lem_protocol::{Bulk, Instruction};
+use ratatui_core::terminal::Terminal;
+use ratatui_crossterm::CrosstermBackend;
+use views::Registry;
 
 const WIDTH: u16 = 80;
 const HEIGHT: u16 = 24;
 
 fn size() -> serde_json::Value {
     serde_json::json!({"width": WIDTH, "height": HEIGHT})
+}
+
+/// Apply one `bulk` frame to the registry.
+///
+/// Returns true when the frame is complete — every bulk ends with
+/// `update-display`, which is the signal to composite and draw. See
+/// `../../../docs/protocol-notes.md` section 14.
+fn apply_frame(registry: &mut Registry, bulk: Bulk) -> bool {
+    let mut complete = false;
+    for raw in bulk {
+        // A recognised method carrying an argument that does not fit its
+        // type is worth knowing about, but never worth killing the editor
+        // over: skip the instruction and keep the frame.
+        let instruction = match raw.parse() {
+            Ok(instruction) => instruction,
+            Err(error) => {
+                eprintln!("lem-ratatui: undecodable instruction: {error}");
+                continue;
+            }
+        };
+        match instruction {
+            Instruction::MakeView(view) => registry.insert(view),
+            Instruction::DeleteView(arg) => registry.remove(arg.view_info.id),
+            Instruction::ResizeView(r) => registry.resize(r.view_info.id, r.width, r.height),
+            Instruction::MoveView(m) => registry.move_to(m.view_info.id, m.x, m.y),
+            Instruction::Put(p) | Instruction::ModelinePut(p) => {
+                if let Some(vb) = registry.get_mut(p.view_info.id) {
+                    paint::put(vb, &p);
+                }
+            }
+            Instruction::ClearEol(c) => {
+                if let Some(vb) = registry.get_mut(c.view_info.id) {
+                    paint::clear_eol(vb, c.x, c.y);
+                }
+            }
+            Instruction::Clear(c) | Instruction::ClearEob(c) => {
+                if let Some(vb) = registry.get_mut(c.view_info.id) {
+                    paint::clear_eob(vb, c.y);
+                }
+            }
+            Instruction::MoveCursor(_) => {}
+            Instruction::Other { method } => {
+                complete |= method == "update-display";
+            }
+        }
+    }
+    complete
 }
 
 fn main() -> Result<()> {
@@ -32,16 +83,20 @@ fn main() -> Result<()> {
     let log = PathBuf::from("/tmp/lem-ratatui.log");
 
     // Held for the whole run; dropping it restores the terminal. None when
-    // stdout is not a TTY, where there is nothing to take over.
-    let _guard = term::Guard::new_if_interactive()?;
+    // stdout is not a TTY, where there is nothing to take over and the
+    // backend would have no size to report.
+    // Bound for the whole run: dropping it restores the terminal, so it
+    // must outlive the draw loop. Matched by reference — consuming it here
+    // would restore the terminal before the first frame is painted.
+    let guard = term::Guard::new_if_interactive()?;
+    let mut terminal = match &guard {
+        Some(_) => Some(Terminal::new(CrosstermBackend::new(io::stdout()))?),
+        None => None,
+    };
 
     let mut lem = child::Lem::spawn(&program, &log)?;
+    let mut registry = Registry::default();
 
-    // Both halves of the handshake are mandatory. Colours must be non-nil
-    // or the editor's unbound colour slots make every update-display throw
-    // and it emits nothing, forever; and the login *response* must be
-    // followed by `redraw` before any frame arrives. See
-    // docs/protocol-notes.md section 11.
     lem.send(&rpc::request(
         1,
         "login",
@@ -53,13 +108,8 @@ fn main() -> Result<()> {
     )?)?;
 
     let mut logged_in = false;
-    let mut notifications = 0usize;
+    let mut frames = 0usize;
 
-    // Stop after one complete frame. Every `bulk` ends with an
-    // `update-display` instruction — one bulk is exactly one frame — and
-    // the editor keeps emitting them indefinitely (cursor blink, modeline
-    // clock), so a fixed message count would either hang or cut a frame
-    // in half.
     while let Some(incoming) = lem.recv()? {
         match incoming {
             Incoming::Response { .. } if !logged_in => {
@@ -69,27 +119,27 @@ fn main() -> Result<()> {
                     serde_json::json!({"size": size()}),
                 )?)?;
             }
-            Incoming::Notification { method, params } => {
-                notifications += 1;
-                if method == "bulk" {
-                    let instructions = params.as_array().map_or(&[][..], Vec::as_slice);
-                    let complete = instructions.iter().any(|i| {
-                        i.get("method").and_then(|m| m.as_str()) == Some("update-display")
-                    });
-                    eprintln!(
-                        "lem-ratatui: frame of {} instructions{}",
-                        instructions.len(),
-                        if complete { " (complete)" } else { "" }
-                    );
-                    if complete {
-                        eprintln!("lem-ratatui: first frame after {notifications} notifications");
-                        return Ok(());
+            Incoming::Notification { method, params } if method == "bulk" => {
+                if apply_frame(&mut registry, serde_json::from_value(params)?) {
+                    frames += 1;
+                    match terminal.as_mut() {
+                        Some(terminal) => {
+                            terminal.draw(|frame| frame.render_widget(&registry, frame.area()))?;
+                        }
+                        None if frames >= 1 => {
+                            // Headless: nothing to draw to, so report what
+                            // the frame would have painted and stop.
+                            eprintln!("lem-ratatui: {} views composited", registry.len());
+                            return Ok(());
+                        }
+                        None => {}
                     }
                 }
             }
-            Incoming::Response { .. } => {}
+            Incoming::Notification { .. } | Incoming::Response { .. } => {}
         }
     }
 
-    anyhow::bail!("Lem exited after {notifications} notifications without a complete frame")
+    eprintln!("lem-ratatui: Lem exited after {frames} frames");
+    Ok(())
 }

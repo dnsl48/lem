@@ -51,14 +51,6 @@ impl Guard {
             Ok(None)
         }
     }
-
-    /// The stream to build a backend on.
-    // Unused until Task 6 constructs the CrosstermBackend from it; kept
-    // here because it is the Guard's whole reason for owning a Stdout.
-    #[allow(dead_code)]
-    pub fn out(&mut self) -> &mut Stdout {
-        &mut self.out
-    }
 }
 
 impl Drop for Guard {
