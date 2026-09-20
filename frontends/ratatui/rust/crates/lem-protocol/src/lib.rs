@@ -174,3 +174,91 @@ mod tests {
         assert_eq!(plain.underline, Some(Underline::On(true)));
     }
 }
+
+/// Which layer a view composites into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewKind {
+    Tile,
+    Header,
+    Floating,
+}
+
+/// What a view contains.
+///
+/// `Html` views are real — Lem's tabbar is one — and a terminal cannot
+/// paint them. They are tracked so their geometry stays consistent, but
+/// skipped when compositing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewType {
+    #[default]
+    Editor,
+    Html,
+}
+
+/// A window, positioned in character cells by Lem.
+///
+/// Casing on the wire is mixed: `pixelX` is camelCase while
+/// `use_modeline` is snake_case. Renamed per field rather than with a
+/// blanket `rename_all`, which would silently drop the snake_case ones.
+///
+/// `use_modeline` is `Option<bool>` because the wire sends `null` for
+/// views that have no modeline, and `#[serde(default)]` on a plain `bool`
+/// rejects an explicit null.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct View {
+    pub id: u64,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+    #[serde(default)]
+    pub use_modeline: Option<bool>,
+    pub kind: ViewKind,
+    #[serde(rename = "type", default)]
+    pub content_type: ViewType,
+}
+
+impl View {
+    /// Whether this view reserves its last row for a modeline.
+    pub fn has_modeline(&self) -> bool {
+        self.use_modeline.unwrap_or(false)
+    }
+}
+
+/// Argument of `resize-view`: dimensions only, not a whole view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResizeView {
+    pub view_info: ViewInfo,
+    pub width: u16,
+    pub height: u16,
+}
+
+/// Argument of `move-view`: position only, not a whole view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveView {
+    pub view_info: ViewInfo,
+    pub x: u16,
+    pub y: u16,
+}
+
+/// Argument of `clear`, `clear-eol` and `clear-eob`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Clear {
+    pub view_info: ViewInfo,
+    #[serde(default)]
+    pub x: u16,
+    #[serde(default)]
+    pub y: u16,
+}
+
+/// Argument of messages carrying nothing but a view reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewInfoArg {
+    pub view_info: ViewInfo,
+}
