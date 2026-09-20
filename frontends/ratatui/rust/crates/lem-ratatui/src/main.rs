@@ -8,6 +8,7 @@
 //! yet painted — that is Task 6 in `../../../docs/poc-plan.md`.
 
 mod child;
+mod paint;
 mod term;
 mod views;
 

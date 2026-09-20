@@ -922,7 +922,33 @@ git commit -m "feat(ratatui): view registry with z-order compositing"
 
 ---
 
-### Task 5: Paint `put` and `clear-*` into a view buffer
+### Task 5: Paint `put` and `clear-*` into a view buffer — **DONE**
+
+Completed 2026-09-20. 12 tests, gates clean.
+
+**The plan's deferral of wide characters was wrong.** It had `put` walk
+`chars()` with a `// TODO(wide-chars)`, on the assumption that correct
+width handling was a post-MVP refinement. The capture disproves it: the
+startup modeline contains U+1F512 (a lock emoji) with `textWidth: 2`, so
+deferring would have shifted everything after it one cell left in the
+very first frame.
+
+`ratatui_core::buffer::Buffer::set_stringn` handles it outright — it
+splits on graphemes so combining marks stay attached, advances by display
+width, blanks the trailing cell of a double-width grapheme, drops control
+characters and clips at the right edge. So `put` is a thin wrapper rather
+than the hand-rolled loop the plan described. This is the concrete payoff
+ADR 0002 predicted from depending on `ratatui-core` for its buffer.
+
+It does *not* bound-check the row — it indexes `y` directly and would
+panic — so that check stays ours, with a test for it.
+
+**Also learned:** `Cell::reset()` leaves a cell holding `" "`, not an
+empty symbol. A continuation cell after a wide grapheme therefore reads
+as a space; the behaviour that matters is that the next grapheme starts
+two cells along.
+
+### Task 5 (as planned): Paint `put` and `clear-*` into a view buffer
 
 **Files:**
 - Modify: `rust/crates/lem-protocol/src/lib.rs` (add `Clear`)
