@@ -203,3 +203,75 @@ the Rust parent. If it is inherited, a Lisp backtrace lands on the TTY
 and shreds the display. Keeping stderr as a real log is also what makes
 the two-process split debuggable
 ([adr/0004](adr/0004-two-processes-not-embedded-lisp.md)).
+
+## 11. The startup handshake
+
+Established by running a real editor, not by reading the JS. Two things
+are mandatory and neither is obvious from the message list.
+
+**`login` must carry non-nil `foreground` and `background`.** The
+`jsonrpc` implementation class declares those two slots with **no
+`:initform`** (`frontends/server/main.lisp:106-107`), and `handle-login`
+only assigns them when the client sends parseable colours. Omit them and
+the slots stay unbound; the first `lem-if:update-display` then signals
+`UNBOUND-SLOT`, which `with-error-handler` swallows. The editor keeps
+running and **silently emits nothing forever**. The browser client never
+hits this because it always sends its own option colours.
+
+**The client must send a `redraw` notification after the login
+response.** `login` alone produces no frame. `editor.js:1285` does
+exactly this, and `redraw` (`frontends/server/main.lisp:190`) is what
+calls `lem:send-event` with a forced `redraw-display`.
+
+So the minimal working sequence is:
+
+```
+--> {"id":1,"method":"login","params":{"size":{"width":80,"height":24},
+                                       "foreground":"#DDDDDD","background":"#111111"}}
+<-- {"id":1,"result":{"views":[],"foreground":...,"background":...,"size":{...}}}
+--> {"method":"redraw","params":{"size":{"width":80,"height":24}}}
+<-- {"method":"resize-display",...}
+<-- {"method":"bulk","params":[ ... make-view, put, clear-eol, ... ]}
+```
+
+A capture of that sequence lives in
+`../rust/crates/lem-protocol/tests/fixtures/frame.jsonl`.
+
+## 12. Where errors actually go
+
+Anything signalled during a redraw is caught by `with-display-error` /
+`with-error-handler` and logged through log4cl to **`<lem-home>/debug.log`**,
+not to stderr. When the display half goes quiet, that file is the first
+place to look — the process will appear healthy and keep running.
+
+`lem-home` (`src/config.lisp:6`) resolves `LEM_HOME`, then `~/.lem/`,
+then `$XDG_CONFIG_HOME/lem/`. It is used with `merge-pathnames`, so
+**`LEM_HOME` needs a trailing slash** or its last component is treated as
+a filename.
+
+Worth setting to a scratch directory when capturing fixtures: with a real
+profile, `attempt-automigrate-config-file` (`src/config.lisp:33`) can
+block startup on an interactive `y/n` prompt if a legacy `config.lisp`
+exists, and the editor will sit in `prompt-for-y-or-n-p` forever.
+
+## 13. Defects in jsonrpc's stdio server transport
+
+Server-side stdio is not exercised by anything else in this ecosystem,
+and it carries three independent defects. All are worked around in
+`../lisp/jsonrpc-stdio-fixes.lisp`; each is worth reporting upstream.
+
+1. **Notifications never leave the process.** `jsonrpc/server:broadcast`
+   walks `server-client-connections`, populated by `on-open-connection`.
+   The tcp, websocket and local-domain-socket transports all call it;
+   **stdio never does**, so the list stays empty and every notification is
+   dropped. Request/response still works, which is why `login` succeeds
+   while no frame arrives.
+2. **The framing counts characters, not bytes.** `write-message` sends
+   `(length json)` and `read-message` reads into `(make-string length)`,
+   so one non-ASCII character desynchronises everything after it.
+3. **`lem-server`'s own fix for (2) is dead code.** Its
+   `jsonrpc-stdio-patch.lisp` is written against an older API:
+   `CONNECTION-SOCKET`, `READ-HEADERS` and `PARSE-MESSAGE` are all
+   interned-but-undefined against the pinned version, so both of its
+   methods signal `undefined-function` on first use. Verified by loading
+   `lem-server` and checking `fboundp` on each.
