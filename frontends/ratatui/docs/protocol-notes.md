@@ -275,3 +275,33 @@ and it carries three independent defects. All are worked around in
    interned-but-undefined against the pinned version, so both of its
    methods signal `undefined-function` on first use. Verified by loading
    `lem-server` and checking `fboundp` on each.
+
+## 14. One `bulk` is exactly one frame
+
+Every `bulk` notification ends with an `update-display` instruction.
+That is the frame boundary, and it is the signal to composite and draw.
+
+From the committed capture, a fresh 80x24 editor after login + redraw:
+
+```
+0: <login response>
+1: resize-display
+2: bulk  n=18  make-view, resize-view, move-view, put, modeline-put,
+               clear-eol, clear-eob, change-view, move-cursor,
+               redraw-view-after, update-display
+3: bulk  n=12
+4: bulk  n=54
+5: bulk  n=13
+6..8: bulk n=12 each
+```
+
+Two consequences for the display half.
+
+**The first `bulk` is the whole initial paint** — 18 instructions
+carrying `make-view` through `update-display`. There is no partial
+startup state to accumulate.
+
+**The editor keeps emitting frames forever**, even with no input: the
+trailing 12-instruction bulks are cursor blink and modeline updates. Any
+loop that waits for a fixed number of messages will either hang or cut a
+frame in half. Read until `update-display`, then draw.
