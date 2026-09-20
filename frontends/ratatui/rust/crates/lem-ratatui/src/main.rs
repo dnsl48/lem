@@ -8,6 +8,7 @@
 
 mod child;
 mod input;
+mod metrics;
 mod paint;
 mod term;
 mod views;
@@ -15,7 +16,7 @@ mod views;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -117,8 +118,8 @@ fn main() -> Result<()> {
     // so reading moves to its own thread and arrives as messages.
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        while let Ok(Some(incoming)) = reader.recv() {
-            if tx.send(incoming).is_err() {
+        while let Ok(Some(received)) = reader.recv() {
+            if tx.send(received).is_err() {
                 break;
             }
         }
@@ -138,6 +139,7 @@ fn main() -> Result<()> {
 
     let mut logged_in = false;
     let mut frames = 0usize;
+    let mut metrics = metrics::Frames::default();
 
     loop {
         // Keyboard first, so a keystroke is never delayed behind a frame.
@@ -172,16 +174,36 @@ fn main() -> Result<()> {
         }
 
         loop {
-            match rx.try_recv() {
-                Ok(Incoming::Response { .. }) if !logged_in => {
+            let received = match rx.try_recv() {
+                Ok(received) => received,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("lem-ratatui: Lem exited after {frames} frames");
+                    eprintln!("lem-ratatui: {}", metrics.report());
+                    return Ok(());
+                }
+            };
+            let child::Received {
+                incoming,
+                bytes,
+                decode,
+            } = received;
+            match incoming {
+                Incoming::Response { .. } if !logged_in => {
                     logged_in = true;
                     writer.send(&rpc::notification(
                         "redraw",
                         serde_json::json!({"size": size_json(size)}),
                     )?)?;
                 }
-                Ok(Incoming::Notification { method, params }) if method == "bulk" => {
-                    if apply_frame(&mut registry, serde_json::from_value(params)?) {
+                Incoming::Notification { method, params } if method == "bulk" => {
+                    // Decode cost is the envelope plus the instruction
+                    // array; both are JSON work that a different codec
+                    // would change, so both are counted.
+                    let started = Instant::now();
+                    let bulk: Bulk = serde_json::from_value(params)?;
+                    metrics.record(bytes, decode + started.elapsed());
+                    if apply_frame(&mut registry, bulk) {
                         frames += 1;
                         match terminal.as_mut() {
                             Some(terminal) => {
@@ -192,17 +214,13 @@ fn main() -> Result<()> {
                                 // Headless: nothing to draw to, so report
                                 // what the frame would have painted and stop.
                                 eprintln!("lem-ratatui: {} views composited", registry.len());
+                                eprintln!("lem-ratatui: {}", metrics.report());
                                 return Ok(());
                             }
                         }
                     }
                 }
-                Ok(_) => {}
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    eprintln!("lem-ratatui: Lem exited after {frames} frames");
-                    return Ok(());
-                }
+                _ => {}
             }
         }
     }

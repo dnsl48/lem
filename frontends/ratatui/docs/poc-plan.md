@@ -1807,7 +1807,27 @@ git commit -m "feat(ratatui): reflow on terminal resize"
 
 ---
 
-### Task 9: Frame instrumentation
+### Task 9: Frame instrumentation — **DONE**
+
+Completed 2026-09-20. 53 tests, gates clean. Numbers recorded in
+[`adr/0003`](adr/0003-keep-json-codec-for-now.md) under **Measurements**.
+
+Release build, realistic session: `960 frames, 3,006,287 B total,
+avg 3,131 B, max 17,234 B, avg decode 68us`.
+
+Decoding is 0.4% of a 16.7ms frame budget, so ADR 0003's deferral holds —
+on evidence now rather than expectation.
+
+**The unexpected result is the idle frame rate.** 960 frames in ~25
+seconds is ~38 per second, mostly idle: cursor blink and modeline clock
+emit a frame each regardless of input. Not sending unchanged frames would
+beat every byte-level lever in ADR 0003.
+
+**Scope honesty:** this measures the Rust *decode* side only. The Lisp
+*encode* side — where the upstream perf commits were — is not
+instrumented, and nothing here licenses a conclusion about it.
+
+### Task 9 (as planned): Frame instrumentation
 
 ADR 0003 defers the codec decision explicitly *on condition* that the PoC
 produces numbers. This task is that condition.
