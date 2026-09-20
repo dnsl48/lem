@@ -123,3 +123,33 @@ This instruments the **Rust decode** side only. The Lisp **encode** side
 is untouched, and that is where the two upstream perf commits cited above
 actually were. A conclusion about YASON's cost needs separate
 instrumentation inside `lem-server`; nothing here licenses one.
+
+
+## Modeline memoisation — September 2026
+
+Acting on the amplification finding above, and entirely inside
+`frontends/ratatui/lisp/modeline.lisp`: the inherited
+`render-line-on-modeline` runs with its output diverted into a list,
+which is compared against the last one sent for that view. Identical
+output is dropped.
+
+Fixed workload (open a file, type 40 characters, save, quit):
+
+| | before | after | change |
+|---|---|---|---|
+| frames | 535 | 450 | -16% |
+| total bytes | 1,635,547 | 745,502 | **-54%** |
+| avg bytes/frame | 3,057 | 1,656 | **-46%** |
+| avg decode | 62us | 36us | -42% |
+
+**This needed no upstream change and no monkey-patching.**
+`lem-if:render-line-on-modeline` and `lem-server::notify*` are both
+generic functions, and our implementation class is a subclass of
+`lem-server:jsonrpc`, so a method specialised on it is strictly more
+specific. That is ordinary extension — unlike
+`lisp/jsonrpc-stdio-fixes.lisp`, which replaces methods with identical
+specialisers and is a genuine patch.
+
+It relies on the display half never clearing a view's modeline except on
+creation or resize; both invalidate the cache. A display half that
+cleared it independently would go stale.
