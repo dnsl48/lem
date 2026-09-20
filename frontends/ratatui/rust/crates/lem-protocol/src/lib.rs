@@ -225,6 +225,18 @@ pub enum ViewType {
     Html,
 }
 
+/// How a floating window's border is drawn.
+///
+/// Sent lower-cased by `lem-server`; absent means a full box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BorderShape {
+    /// A box whose top corners join what sits above it.
+    DropCurtain,
+    /// A single rule down the left edge, no box.
+    LeftBorder,
+}
+
 /// A window, positioned in character cells by Lem.
 ///
 /// Casing on the wire is mixed: `pixelX` is camelCase while
@@ -246,6 +258,11 @@ pub struct View {
     pub kind: ViewKind,
     #[serde(rename = "type", default)]
     pub content_type: ViewType,
+    /// Border thickness in cells; floating windows default to 1.
+    #[serde(default)]
+    pub border: Option<u16>,
+    #[serde(default)]
+    pub border_shape: Option<BorderShape>,
 }
 
 impl View {
