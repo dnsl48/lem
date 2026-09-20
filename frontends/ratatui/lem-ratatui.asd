@@ -11,4 +11,5 @@
                (:file "transport")
                (:file "jsonrpc-stdio-fixes")
                (:file "modeline")
+               (:file "frame")
                (:file "main")))
