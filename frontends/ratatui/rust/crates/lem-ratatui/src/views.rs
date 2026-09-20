@@ -12,15 +12,39 @@ use ratatui_core::layout::Rect;
 use ratatui_core::widgets::Widget;
 
 /// A view and the cells painted into it.
+///
+/// The modeline is a *separate* one-row buffer rather than the view's
+/// last row, because Lem treats it as an extra row below the view: the
+/// browser client allocates `height + (useModeline ? 1 : 0)`, and every
+/// `modeline-put` arrives at `y: 0` of its own coordinate space. Painting
+/// it into the view buffer would overwrite the first line of the file.
 pub struct ViewBuffer {
     pub view: View,
     pub buffer: Buffer,
+    pub modeline: Buffer,
 }
 
 /// Every live view, in insertion order.
 #[derive(Default)]
 pub struct Registry {
     views: Vec<ViewBuffer>,
+}
+
+/// Copy `source` onto `screen` at (`x`, `y`), clipped to `area`.
+fn blit(screen: &mut Buffer, source: &Buffer, x: u16, y: u16, area: Rect) {
+    for sy in 0..source.area.height {
+        let Some(ty) = y.checked_add(sy) else { return };
+        if ty >= area.height {
+            return;
+        }
+        for sx in 0..source.area.width {
+            let Some(tx) = x.checked_add(sx) else { break };
+            if tx >= area.width {
+                break;
+            }
+            screen[(tx, ty)] = source[(sx, sy)].clone();
+        }
+    }
 }
 
 /// Painting order. Tiles are the background, floating windows the top.
@@ -36,8 +60,13 @@ impl Registry {
     /// Add a view, replacing any existing one with the same id.
     pub fn insert(&mut self, view: View) {
         let buffer = Buffer::empty(Rect::new(0, 0, view.width, view.height));
+        let modeline = Buffer::empty(Rect::new(0, 0, view.width, 1));
         self.remove(view.id);
-        self.views.push(ViewBuffer { view, buffer });
+        self.views.push(ViewBuffer {
+            view,
+            buffer,
+            modeline,
+        });
     }
 
     pub fn remove(&mut self, id: u64) {
@@ -67,6 +96,7 @@ impl Registry {
             vb.view.width = width;
             vb.view.height = height;
             vb.buffer = Buffer::empty(Rect::new(0, 0, width, height));
+            vb.modeline = Buffer::empty(Rect::new(0, 0, width, 1));
         }
     }
 
@@ -94,22 +124,11 @@ impl Registry {
 
         let area = screen.area;
         for vb in ordered {
-            for y in 0..vb.buffer.area.height {
-                let Some(sy) = vb.view.y.checked_add(y) else {
-                    break;
-                };
-                if sy >= area.height {
-                    break;
-                }
-                for x in 0..vb.buffer.area.width {
-                    let Some(sx) = vb.view.x.checked_add(x) else {
-                        break;
-                    };
-                    if sx >= area.width {
-                        break;
-                    }
-                    screen[(sx, sy)] = vb.buffer[(x, y)].clone();
-                }
+            blit(screen, &vb.buffer, vb.view.x, vb.view.y, area);
+            if vb.view.has_modeline() {
+                // One row immediately below the view, not its last row.
+                let y = vb.view.y.saturating_add(vb.view.height);
+                blit(screen, &vb.modeline, vb.view.x, y, area);
             }
         }
     }
@@ -213,6 +232,46 @@ mod tests {
         let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
         registry.composite(&mut screen);
         assert_eq!(screen[(0, 0)].symbol(), "t", "tile shows through");
+    }
+
+    #[test]
+    fn the_modeline_sits_one_row_below_the_view() {
+        // Lem allocates the modeline as an extra row: a view of height 2
+        // at y=1 owns screen rows 1-2, and its modeline is row 3. Painting
+        // it into the view would overwrite the buffer's first line.
+        let mut registry = Registry::default();
+        let mut v = view(1, 0, 1, 4, 2, ViewKind::Tile);
+        v.use_modeline = Some(true);
+        registry.insert(v);
+        fill(&mut registry, 1, 'b');
+        {
+            let vb = registry.get_mut(1).unwrap();
+            for x in 0..4 {
+                vb.modeline[(x, 0)].set_char('m');
+            }
+        }
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 5));
+        registry.composite(&mut screen);
+
+        assert_eq!(screen[(0, 1)].symbol(), "b", "first buffer row intact");
+        assert_eq!(screen[(0, 2)].symbol(), "b", "last buffer row");
+        assert_eq!(screen[(0, 3)].symbol(), "m", "modeline below the view");
+    }
+
+    #[test]
+    fn a_view_without_a_modeline_reserves_no_row() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 4, 1, ViewKind::Tile));
+        fill(&mut registry, 1, 'b');
+        {
+            let vb = registry.get_mut(1).unwrap();
+            vb.modeline[(0, 0)].set_char('m');
+        }
+        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 3));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(0, 0)].symbol(), "b");
+        assert_eq!(screen[(0, 1)].symbol(), " ", "no modeline painted");
     }
 
     #[test]
