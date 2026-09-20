@@ -4,17 +4,22 @@
 //! `lem-server` JSON-RPC protocol over stdio, paints the frames it is
 //! sent into per-view cell buffers, composites them, and draws.
 //!
-//! Status: rendering only. Input is Task 7 in `../../../docs/poc-plan.md`.
+//! Status: rendering and keyboard input. Resize is Task 8 in
+//! `../../../docs/poc-plan.md`.
 
 mod child;
+mod input;
 mod paint;
 mod term;
 mod views;
 
 use std::io;
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use anyhow::Result;
+use crossterm::event::{self, Event, KeyEventKind};
 use lem_protocol::rpc::{self, Incoming};
 use lem_protocol::{Bulk, Instruction};
 use ratatui_core::terminal::Terminal;
@@ -82,9 +87,6 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("../lem-ratatui-lisp"));
     let log = PathBuf::from("/tmp/lem-ratatui.log");
 
-    // Held for the whole run; dropping it restores the terminal. None when
-    // stdout is not a TTY, where there is nothing to take over and the
-    // backend would have no size to report.
     // Bound for the whole run: dropping it restores the terminal, so it
     // must outlive the draw loop. Matched by reference — consuming it here
     // would restore the terminal before the first frame is painted.
@@ -94,10 +96,24 @@ fn main() -> Result<()> {
         None => None,
     };
 
-    let mut lem = child::Lem::spawn(&program, &log)?;
+    // `_lem` is held only for its Drop, which kills and reaps the child.
+    let (_lem, mut reader, mut writer) = child::Lem::spawn(&program, &log)?;
     let mut registry = Registry::default();
 
-    lem.send(&rpc::request(
+    // The reader blocks, and the main loop must also watch the terminal,
+    // so reading moves to its own thread and arrives as messages.
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok(Some(incoming)) = reader.recv() {
+            if tx.send(incoming).is_err() {
+                break;
+            }
+        }
+        // Dropping tx closes the channel, which is how the main loop
+        // learns that Lem exited.
+    });
+
+    writer.send(&rpc::request(
         1,
         "login",
         serde_json::json!({
@@ -110,36 +126,58 @@ fn main() -> Result<()> {
     let mut logged_in = false;
     let mut frames = 0usize;
 
-    while let Some(incoming) = lem.recv()? {
-        match incoming {
-            Incoming::Response { .. } if !logged_in => {
-                logged_in = true;
-                lem.send(&rpc::notification(
-                    "redraw",
-                    serde_json::json!({"size": size()}),
-                )?)?;
-            }
-            Incoming::Notification { method, params } if method == "bulk" => {
-                if apply_frame(&mut registry, serde_json::from_value(params)?) {
-                    frames += 1;
-                    match terminal.as_mut() {
-                        Some(terminal) => {
-                            terminal.draw(|frame| frame.render_widget(&registry, frame.area()))?;
-                        }
-                        None if frames >= 1 => {
-                            // Headless: nothing to draw to, so report what
-                            // the frame would have painted and stop.
-                            eprintln!("lem-ratatui: {} views composited", registry.len());
-                            return Ok(());
-                        }
-                        None => {}
+    loop {
+        // Keyboard first, so a keystroke is never delayed behind a frame.
+        if terminal.is_some() && event::poll(Duration::from_millis(10))? {
+            match event::read()? {
+                // Press only: under the kitty protocol and on Windows,
+                // releases and repeats arrive too and would double every
+                // keystroke.
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if let Some(payload) = input::convert(key) {
+                        writer.send(&rpc::notification(
+                            "input",
+                            serde_json::json!({"kind": "key", "value": payload}),
+                        )?)?;
                     }
                 }
+                _ => {}
             }
-            Incoming::Notification { .. } | Incoming::Response { .. } => {}
+        }
+
+        loop {
+            match rx.try_recv() {
+                Ok(Incoming::Response { .. }) if !logged_in => {
+                    logged_in = true;
+                    writer.send(&rpc::notification(
+                        "redraw",
+                        serde_json::json!({"size": size()}),
+                    )?)?;
+                }
+                Ok(Incoming::Notification { method, params }) if method == "bulk" => {
+                    if apply_frame(&mut registry, serde_json::from_value(params)?) {
+                        frames += 1;
+                        match terminal.as_mut() {
+                            Some(terminal) => {
+                                terminal
+                                    .draw(|frame| frame.render_widget(&registry, frame.area()))?;
+                            }
+                            None => {
+                                // Headless: nothing to draw to, so report
+                                // what the frame would have painted and stop.
+                                eprintln!("lem-ratatui: {} views composited", registry.len());
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("lem-ratatui: Lem exited after {frames} frames");
+                    return Ok(());
+                }
+            }
         }
     }
-
-    eprintln!("lem-ratatui: Lem exited after {frames} frames");
-    Ok(())
 }
