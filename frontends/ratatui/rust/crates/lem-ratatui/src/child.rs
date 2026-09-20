@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use lem_protocol::{framing, rpc::Incoming};
@@ -59,20 +60,37 @@ impl Lem {
     }
 }
 
+/// One message, with what it cost to read.
+///
+/// The size and timing travel with the message so the frame loop can
+/// account for them without the reader knowing what a frame is (ADR 0003).
+pub struct Received {
+    pub incoming: Incoming,
+    /// Framed body length in bytes, excluding the header.
+    pub bytes: usize,
+    /// Time spent decoding the JSON-RPC envelope.
+    pub decode: Duration,
+}
+
 impl LemReader {
     /// Read the next message. `Ok(None)` means Lem exited.
-    pub fn recv(&mut self) -> Result<Option<Incoming>> {
+    pub fn recv(&mut self) -> Result<Option<Received>> {
         let Some(body) = framing::read_message(&mut self.stdout)? else {
             return Ok(None);
         };
-        let incoming = serde_json::from_slice(&body).with_context(|| {
+        let started = Instant::now();
+        let incoming: Incoming = serde_json::from_slice(&body).with_context(|| {
             format!(
                 "decoding a {} byte message: {}",
                 body.len(),
                 String::from_utf8_lossy(&body[..body.len().min(200)])
             )
         })?;
-        Ok(Some(incoming))
+        Ok(Some(Received {
+            incoming,
+            bytes: body.len(),
+            decode: started.elapsed(),
+        }))
     }
 }
 

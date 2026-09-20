@@ -69,3 +69,42 @@ Revisit only on measurement, and in this order:
 - If a profile ever does demand more, levers 1 and 3 are available
   without breaking a single existing client, and both are larger wins
   than MessagePack would have been.
+
+## Measurements — September 2026
+
+Taken with the instrumentation added in Task 9, which is the condition
+this record was accepted on.
+
+**Release build, one realistic session** — open a file, type ~135
+characters, move the cursor, shrink to 60x20 and grow back to 100x30,
+save, quit:
+
+```
+960 frames, 3,006,287 B total, avg 3,131 B, max 17,234 B, avg decode 68us
+```
+
+**First frame alone**, 80x24, headless: 7,061 B, decoding in 124us
+(release) or 414us (debug).
+
+### What this says
+
+**Decoding is not the bottleneck.** 68us per frame is 0.4% of a 16.7ms
+frame budget; the whole session spent about 65ms decoding. A faster codec
+would be optimising something that costs nothing. The decision to keep
+JSON stands, and now stands on numbers.
+
+**The idle frame rate is the more interesting result.** 960 frames across
+roughly 25 seconds is about 38 frames per second, and the session was
+idle for most of it — the cursor blink and modeline clock emit a frame
+each regardless of input. At ~3KB a frame that is a sustained ~120 KB/s
+and a constant wakeup for both processes with nothing on screen changing.
+If anything here deserves attention before the codec, it is that: the
+levers in this record shrink each frame, but not sending an unchanged
+frame at all would beat any of them.
+
+### What was *not* measured
+
+This instruments the **Rust decode** side only. The Lisp **encode** side
+is untouched, and that is where the two upstream perf commits cited above
+actually were. A conclusion about YASON's cost needs separate
+instrumentation inside `lem-server`; nothing here licenses one.
