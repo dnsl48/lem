@@ -4,8 +4,7 @@
 //! `lem-server` JSON-RPC protocol over stdio, paints the frames it is
 //! sent into per-view cell buffers, composites them, and draws.
 //!
-//! Status: rendering and keyboard input. Resize is Task 8 in
-//! `../../../docs/poc-plan.md`.
+//! Status: rendering, keyboard input and reflow on resize.
 
 mod child;
 mod input;
@@ -26,11 +25,21 @@ use ratatui_core::terminal::Terminal;
 use ratatui_crossterm::CrosstermBackend;
 use views::Registry;
 
-const WIDTH: u16 = 80;
-const HEIGHT: u16 = 24;
+/// Size reported when there is no terminal to measure — headless runs and
+/// tests. Matches the geometry the committed fixture was captured at.
+const HEADLESS_SIZE: (u16, u16) = (80, 24);
 
-fn size() -> serde_json::Value {
-    serde_json::json!({"width": WIDTH, "height": HEIGHT})
+fn size_json((width, height): (u16, u16)) -> serde_json::Value {
+    serde_json::json!({"width": width, "height": height})
+}
+
+/// The terminal's current size, or [`HEADLESS_SIZE`] without one.
+fn display_size(interactive: bool) -> (u16, u16) {
+    if interactive {
+        crossterm::terminal::size().unwrap_or(HEADLESS_SIZE)
+    } else {
+        HEADLESS_SIZE
+    }
 }
 
 /// Apply one `bulk` frame to the registry.
@@ -96,6 +105,10 @@ fn main() -> Result<()> {
         None => None,
     };
 
+    // Lem must be told the real geometry, not an assumed 80x24, or every
+    // frame is laid out for the wrong screen.
+    let mut size = display_size(guard.is_some());
+
     // `_lem` is held only for its Drop, which kills and reaps the child.
     let (_lem, mut reader, mut writer) = child::Lem::spawn(&program, &log)?;
     let mut registry = Registry::default();
@@ -117,7 +130,7 @@ fn main() -> Result<()> {
         1,
         "login",
         serde_json::json!({
-            "size": size(),
+            "size": size_json(size),
             "foreground": "#DDDDDD",
             "background": "#111111",
         }),
@@ -141,6 +154,19 @@ fn main() -> Result<()> {
                         )?)?;
                     }
                 }
+                // `redraw` is what reflows: it resizes the display, tells
+                // every client, and forces a full repaint. Lem answers with
+                // resize-view and move-view for each window, which the
+                // registry applies.
+                Event::Resize(columns, rows) => {
+                    size = (columns, rows);
+                    writer.send(&rpc::notification(
+                        "redraw",
+                        serde_json::json!({
+                            "size": size_json(size),
+                        }),
+                    )?)?;
+                }
                 _ => {}
             }
         }
@@ -151,7 +177,7 @@ fn main() -> Result<()> {
                     logged_in = true;
                     writer.send(&rpc::notification(
                         "redraw",
-                        serde_json::json!({"size": size()}),
+                        serde_json::json!({"size": size_json(size)}),
                     )?)?;
                 }
                 Ok(Incoming::Notification { method, params }) if method == "bulk" => {
