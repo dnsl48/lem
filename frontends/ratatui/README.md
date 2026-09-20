@@ -205,6 +205,18 @@ Nothing here is required for the PoC; each is its own piece of work.
 - **Cursor shape and position** — `move-cursor` is currently ignored; the
   cursor renders only as Lem's own reverse-video cell.
 
+## Keys
+
+crossterm decodes the C0 controls 0x1C–0x1F as `Ctrl+'4'` through
+`Ctrl+'7'`, but ASCII and Lem both name those bytes `C-\`, `C-]`, `C-^`
+and `C-_`. They are translated back, so `C-\` reaches Lem as `C-\`
+rather than reporting `Key not found: C-4`, and `C-_` runs `redo`.
+
+The two readings are indistinguishable on the wire — a terminal sends
+0x1C for both `Ctrl+4` and `C-\` — so the ASCII one wins because it is
+what Lem binds. Enabling the kitty keyboard protocol would separate them
+and this would need revisiting.
+
 ## Known gaps in the scaffold
 
 - `lisp/main.lisp` reaches into `lem-server::` internals because the
