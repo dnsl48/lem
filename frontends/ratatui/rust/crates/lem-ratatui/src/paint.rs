@@ -1,9 +1,5 @@
 //! Turning protocol paint commands into cells.
 
-// Exercised by this module's tests until Task 6 wires painting into the
-// frame loop; the allow comes off with that change.
-#![allow(dead_code)]
-
 use lem_protocol::{Attribute, Put, Underline};
 use ratatui_core::style::{Color, Modifier, Style};
 

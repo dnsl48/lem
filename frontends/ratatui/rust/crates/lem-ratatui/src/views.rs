@@ -6,13 +6,10 @@
 //! buffers and blitted here in layer order. See
 //! `../../../docs/protocol-notes.md` section 7.
 
-// Exercised by this module's tests until Task 6 wires the registry into
-// the frame loop; the allow comes off with that change.
-#![allow(dead_code)]
-
 use lem_protocol::{View, ViewKind, ViewType};
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::Rect;
+use ratatui_core::widgets::Widget;
 
 /// A view and the cells painted into it.
 pub struct ViewBuffer {
@@ -45,6 +42,15 @@ impl Registry {
 
     pub fn remove(&mut self, id: u64) {
         self.views.retain(|vb| vb.view.id != id);
+    }
+
+    /// How many views are tracked, html ones included.
+    pub fn len(&self) -> usize {
+        self.views.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.views.is_empty()
     }
 
     pub fn get_mut(&mut self, id: u64) -> Option<&mut ViewBuffer> {
@@ -106,6 +112,18 @@ impl Registry {
                 }
             }
         }
+    }
+}
+
+/// Renders the composited screen.
+///
+/// `Frame`'s buffer is `pub(crate)`, so the only way into it is the
+/// `Widget` trait — which lives in `ratatui-core` alongside the buffer.
+/// This is the one piece of Ratatui's widget system the frontend uses,
+/// and it is the trait, not the widget library (ADR 0002).
+impl Widget for &Registry {
+    fn render(self, _area: Rect, buf: &mut Buffer) {
+        self.composite(buf);
     }
 }
 
