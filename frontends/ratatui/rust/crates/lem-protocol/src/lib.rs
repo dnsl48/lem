@@ -81,11 +81,28 @@ pub struct RawInstruction {
     pub argument: serde_json::Value,
 }
 
+/// Where Lem last printed its cursor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveCursor {
+    pub view_info: ViewInfo,
+    pub x: u16,
+    pub y: u16,
+}
+
 /// A recognised instruction, or a record that one was skipped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     Put(Put),
     ModelinePut(Put),
+    MakeView(View),
+    DeleteView(ViewInfoArg),
+    Clear(Clear),
+    ClearEol(Clear),
+    ClearEob(Clear),
+    ResizeView(ResizeView),
+    MoveView(MoveView),
+    MoveCursor(MoveCursor),
     /// A method this display half does not implement.
     Other {
         method: String,
@@ -102,6 +119,17 @@ impl RawInstruction {
         Ok(match self.method.as_str() {
             "put" => Instruction::Put(serde_json::from_value(self.argument)?),
             "modeline-put" => Instruction::ModelinePut(serde_json::from_value(self.argument)?),
+            "make-view" => Instruction::MakeView(serde_json::from_value(self.argument)?),
+            "delete-view" => Instruction::DeleteView(serde_json::from_value(self.argument)?),
+            "clear" => Instruction::Clear(serde_json::from_value(self.argument)?),
+            "clear-eol" => Instruction::ClearEol(serde_json::from_value(self.argument)?),
+            "clear-eob" => Instruction::ClearEob(serde_json::from_value(self.argument)?),
+            "resize-view" => Instruction::ResizeView(serde_json::from_value(self.argument)?),
+            "move-view" => Instruction::MoveView(serde_json::from_value(self.argument)?),
+            "move-cursor" => Instruction::MoveCursor(serde_json::from_value(self.argument)?),
+            // `redraw-view-after`, `change-view` and `update-display` carry
+            // nothing a terminal acts on beyond their arrival, and fall
+            // through to Other deliberately.
             _ => Instruction::Other {
                 method: self.method,
             },
