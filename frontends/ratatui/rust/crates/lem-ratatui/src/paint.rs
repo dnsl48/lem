@@ -119,6 +119,8 @@ mod tests {
                 use_modeline: None,
                 kind: ViewKind::Tile,
                 content_type: ViewType::Editor,
+                border: None,
+                border_shape: None,
             },
             buffer: Buffer::empty(Rect::new(0, 0, w, h)),
             modeline: Buffer::empty(Rect::new(0, 0, w, 1)),
