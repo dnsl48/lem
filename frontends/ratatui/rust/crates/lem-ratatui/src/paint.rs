@@ -70,6 +70,16 @@ pub fn put(vb: &mut ViewBuffer, put: &Put) {
         .set_stringn(put.x, put.y, &put.text, put.text_width as usize, style);
 }
 
+/// Paint one run of text into a view's modeline row.
+///
+/// `modeline-put` always arrives at `y: 0`, addressing the modeline's own
+/// one-row space rather than the view's.
+pub fn modeline_put(vb: &mut ViewBuffer, put: &Put) {
+    let style = put.attribute.as_ref().map(style_of).unwrap_or_default();
+    vb.modeline
+        .set_stringn(put.x, 0, &put.text, put.text_width as usize, style);
+}
+
 /// Blank the rest of row `y` from column `x`.
 pub fn clear_eol(vb: &mut ViewBuffer, x: u16, y: u16) {
     let area = vb.buffer.area;
@@ -111,6 +121,7 @@ mod tests {
                 content_type: ViewType::Editor,
             },
             buffer: Buffer::empty(Rect::new(0, 0, w, h)),
+            modeline: Buffer::empty(Rect::new(0, 0, w, 1)),
         }
     }
 
