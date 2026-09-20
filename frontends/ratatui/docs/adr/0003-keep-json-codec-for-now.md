@@ -153,3 +153,48 @@ specialisers and is a genuine patch.
 It relies on the display half never clearing a view's modeline except on
 creation or resize; both invalidate the cache. A display half that
 cleared it independently would go stale.
+
+
+## Frame suppression — September 2026
+
+`lisp/frame.lisp` specialises `lem-server::notify-all`, the point where
+the queued messages become one `bulk`, and drops a frame that changes
+nothing on screen.
+
+Deciding what "nothing" means took a measurement rather than a guess. The
+first attempt treated only `update-display` and `redraw-view-after` as
+inert and dropped **1 frame in 495** — useless. Logging what the frames
+actually contained showed why:
+
+```
+352 of 494 frames were exactly:
+    clear-eob  redraw-view-after  move-cursor  update-display
+```
+
+`redraw-lines` emits `clear-eob` whenever the buffer does not fill the
+window, so a small file in a large window produces one every redraw.
+Re-blanking an already-blank region changes nothing, so the frame filter
+tracks the row each view was last cleared from and treats a repeat as
+inert. Any other paint to that view invalidates the entry — and because
+Lem renders lines before blanking the remainder, recording happens after
+invalidation within a frame.
+
+Cumulative against the same fixed workload:
+
+| | baseline | + modeline | + frame suppression |
+|---|---|---|---|
+| frames | 535 | 450 | **130** |
+| total bytes | 1,635,547 | 745,502 | **639,265** |
+| avg bytes/frame | 3,057 | 1,656 | 4,917 |
+
+Frames fall **76%** and bytes **61%**. Average frame size rises because
+what is left are the frames that genuinely paint something; the small
+no-op frames are gone.
+
+Correctness rests on the invalidation being right, so it is tested
+directly: killing eight lines out of a twelve-line file leaves the
+remaining four on screen and every row below them blank, with no ghosts.
+All eight acceptance checks pass.
+
+Like the modeline work, this is specialisation on our own implementation
+class — no upstream change, no patching.
