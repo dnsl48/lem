@@ -1994,7 +1994,12 @@ first presented as a failure:
 - `pkill -f 'ratatui/lem-ratatui-lisp$'` matched the *display half* too,
   whose argv ends with that path, so the test killed what it was
   observing and read SIGTERM as a crash. Find the child by PPID instead.
-- `C-/` is not what a terminal sends for undo. `C-x u` is unambiguous.
+- **`C-/` is not undo here**, for two reasons that were conflated at the
+  time. A terminal sends 0x1F for it, which Lem names `C-_` and binds to
+  **redo**, not undo; and crossterm was separately mangling 0x1F into
+  `Ctrl+7`, so it reached Lem as a key with no binding at all. The
+  mangling is fixed; the binding is Lem's choice, so `C-x u` remains the
+  right way to undo.
 - Scraping `line:col` out of the modeline diff finds nothing, because
   only changed digits are repainted. Assert on effects — where the next
   character lands — not on the rendered indicator.
