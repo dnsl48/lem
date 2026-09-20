@@ -1,0 +1,17 @@
+[package]
+name = "lem-ratatui"
+description = "Terminal display half for Lem: paints lem-server protocol frames with crossterm."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+crossterm = "0.29.0"
+lem-protocol = { path = "../lem-protocol" }
+ratatui-core = "0.1.2"
+ratatui-crossterm = "0.1.2"
