@@ -24,11 +24,21 @@
    ;; elements rather than occupying cells.
    :window-left-margin 1
    :window-bottom-margin 1
-   ;; SGR 58 (coloured underlines) is widely supported by modern
-   ;; terminals and exposed by crossterm as SetUnderlineColor. Left
-   ;; enabled deliberately, but unverified end-to-end: revisit once the
-   ;; display half actually emits it.
-   :underline-color-support t)
+   ;; Off, matching ncurses, despite modern terminals supporting SGR 58
+   ;; and crossterm exposing SetUnderlineColor.
+   ;;
+   ;; The flag has exactly one call site in Lem
+   ;; (src/ext/multi-column-list.lisp:214), and there it reaches for
+   ;; `foreground-color' — the *theme's* foreground, which `lem-default'
+   ;; deliberately leaves NIL so the frontend can supply its own. That
+   ;; NIL goes straight into `darken-color' and C-x C-b dies with "The
+   ;; value NIL is not of type LEM/COMMON/COLOR:COLOR".
+   ;;
+   ;; Turning it off costs no rendering: an attribute that names an
+   ;; underline colour still gets one, because the display half maps
+   ;; `Underline::Color' regardless of this flag. It only stops Lem
+   ;; taking the branch that crashes.
+   :underline-color-support nil)
   (:documentation "Frontend implementation for the Rust/Ratatui display process.
 
 Inherits the whole `lem-if:*' protocol from `lem-server:jsonrpc' and only

@@ -161,6 +161,21 @@ check(8, "killing Lem leaves the terminal clean", status == 0 and restored,
       f"child={child}, status={status}, modes restored={restored}")
 s.kill()
 
+# --- 9: multi-column list renders instead of crashing ------------------
+# C-x C-b goes through lem/multi-column-list, which reaches for the
+# *theme's* foreground when the implementation claims underline-colour
+# support. lem-default leaves that NIL on purpose, so the branch dies in
+# darken-color. Regression guard for that.
+s = Session(); s.pump(8)
+s.send([b"\x18", b"\x06"]); s.pump(1.5)
+s.send("/tmp/lem-accept-list.txt"); s.send([b"\r"]); s.pump(2)
+s.send([b"\x18", b"\x02"]); s.pump(3)          # C-x C-b
+text = s.plain()
+check(9, "C-x C-b lists buffers without crashing",
+      "not of type" not in text and "Buffer" in text,
+      "no backtrace, header present")
+s.kill()
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")

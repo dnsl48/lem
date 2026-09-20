@@ -235,6 +235,34 @@ there still works — it just renders nothing until a terminal-native
 tabbar exists. Compositing still skips html views, since an `html-buffer`
 can appear by other routes.
 
+## An upstream bug worth reporting
+
+`lem/multi-column-list` crashes any frontend that declares
+`:underline-color-support t` while the active theme leaves `:foreground`
+NIL — which `lem-default`, the fallback theme, does on purpose so the
+frontend can supply its own:
+
+```lisp
+;; src/ext/multi-column-list.lisp:214
+:underline (if (underline-color-support-p (implementation))
+               (darken-color (foreground-color) :factor 0.6)   ; NIL -> type error
+               t)
+```
+
+`C-x C-b` dies with *"The value NIL is not of type
+LEM/COMMON/COLOR:COLOR"*. `lem-server` (so webview and the browser) and
+`lem-sdl2` both set that flag, and both read the same `foreground-color`,
+so the same code path applies to them on the default theme.
+
+The obvious fix is for that call site to fall back to
+`lem-if:get-foreground-color`, which is the colour the frontend actually
+reported at login, rather than the theme's deliberately-empty one.
+
+Until then this frontend leaves the flag off, matching ncurses. Nothing
+is lost visually: an attribute naming an underline colour still renders
+one, because the display half maps `Underline::Color` regardless of the
+flag. The flag has exactly one call site in Lem, and it is the crash.
+
 ## Known gaps in the scaffold
 
 - `lisp/main.lisp` reaches into `lem-server::` internals because the
