@@ -11,6 +11,9 @@
 //!
 //! Status: scaffold. Only the hot-path subset is modelled so far.
 
+pub mod framing;
+pub mod rpc;
+
 use serde::{Deserialize, Serialize};
 
 /// A view's identity, as carried by hot-path messages.
