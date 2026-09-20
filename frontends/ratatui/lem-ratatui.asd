@@ -10,4 +10,5 @@
   :components ((:file "implementation")
                (:file "transport")
                (:file "jsonrpc-stdio-fixes")
+               (:file "modeline")
                (:file "main")))
