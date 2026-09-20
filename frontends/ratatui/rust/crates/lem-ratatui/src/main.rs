@@ -9,6 +9,7 @@
 
 mod child;
 mod term;
+mod views;
 
 use std::path::PathBuf;
 
