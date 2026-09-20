@@ -101,13 +101,26 @@ Verified against a real editor under a pty:
 | Killing Lem | the display half exits 0 and still restores the terminal |
 | Splits | `C-x 3` and `C-x 2` render with `│` separators, nested |
 | UTF-8 input | `café naïve 日本語 🔥 żółć` round-trips byte-exact |
-| Completion popups | composite over the buffer, borderless as the browser draws them |
+| Floating windows | ringed by a rounded box, `drop-curtain` joining a prompt above |
 | Clipboard | `M-w` copies to the system clipboard, `C-y` pastes from it |
 
 Window splits get a `│` separator in the column Lem reserves through
-`:window-left-margin`, spanning the modeline row — matching the browser
-client's `VerticalBorder`. Horizontal splits need none: each pane's
-modeline already delimits it.
+`:window-left-margin`, spanning the modeline row. Horizontal splits need
+none: each pane's modeline already delimits it.
+
+Floating windows are ringed by a rounded box in the same characters
+`lem-ncurses/style` uses, drawn *outside* the view as ncurses places it —
+a view at (x, y) of w by h is ringed at (x-1, y-1) of w+2 by h+2. The
+`drop-curtain` shape tees its top corners into whatever sits above, which
+is how a completion list joins the prompt it belongs to.
+
+One consequence worth knowing: Lem grows the `C-x C-f` prompt as you type,
+and it can end up wider than the terminal — at 120 columns a long path
+gave x=20, width=110. The right edge then falls off-screen and the box
+looks open on that side. That is Lem's layout rather than a drawing bug;
+ncurses fares worse there, since `newwin` fails outright when a window
+does not fit and no border is drawn at all. A popup that fits is closed on
+all four sides.
 
 Wide characters work — Lem's startup modeline contains U+1F512, and
 `ratatui-core`'s buffer advances by display width.

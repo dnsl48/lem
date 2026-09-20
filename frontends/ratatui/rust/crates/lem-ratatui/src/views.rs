@@ -6,7 +6,7 @@
 //! buffers and blitted here in layer order. See
 //! `../../../docs/protocol-notes.md` section 7.
 
-use lem_protocol::{View, ViewKind, ViewType};
+use lem_protocol::{BorderShape, View, ViewKind, ViewType};
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::Rect;
 use ratatui_core::widgets::Widget;
@@ -83,6 +83,75 @@ fn draw_separator(screen: &mut Buffer, view: &View, area: Rect) {
             return;
         }
         screen[(x, y)].set_symbol(SEPARATOR);
+    }
+}
+
+/// Box-drawing characters, matching `lem-ncurses/style`.
+mod glyph {
+    pub const HORIZONTAL: &str = "\u{2500}";
+    pub const VERTICAL: &str = "\u{2502}";
+    pub const TOP_LEFT: &str = "\u{256d}";
+    pub const TOP_RIGHT: &str = "\u{256e}";
+    pub const BOTTOM_RIGHT: &str = "\u{256f}";
+    pub const BOTTOM_LEFT: &str = "\u{2570}";
+    pub const TEE_RIGHT: &str = "\u{251c}";
+    pub const TEE_LEFT: &str = "\u{2524}";
+}
+
+/// Write one cell, ignoring anything off-screen.
+///
+/// Signed coordinates because a border is drawn *outside* its view, and a
+/// window flush against the top or left edge puts part of it at -1.
+fn put_cell(screen: &mut Buffer, x: i32, y: i32, symbol: &str, area: Rect) {
+    if x < 0 || y < 0 || x >= i32::from(area.width) || y >= i32::from(area.height) {
+        return;
+    }
+    screen[(x as u16, y as u16)].set_symbol(symbol);
+}
+
+/// Draw a floating window's border.
+///
+/// The border lives outside the view, exactly as `lem-ncurses/view`
+/// places it: the box is inset by `border` cells on every side, so a view
+/// at (x, y) of w by h is ringed by a box at (x-border, y-border) of
+/// (w + 2*border) by (h + 2*border). `left-border` is the exception — a
+/// single rule down the left edge, spanning only the view's own height.
+fn draw_border(screen: &mut Buffer, view: &View, area: Rect) {
+    let Some(size) = view.border.filter(|size| *size > 0) else {
+        return;
+    };
+    let (size, x, y) = (i32::from(size), i32::from(view.x), i32::from(view.y));
+    let (w, h) = (i32::from(view.width), i32::from(view.height));
+
+    if view.border_shape == Some(BorderShape::LeftBorder) {
+        for row in 0..h {
+            put_cell(screen, x - size, y + row, glyph::VERTICAL, area);
+        }
+        return;
+    }
+
+    let (left, top) = (x - size, y - size);
+    let (right, bottom) = (left + w + 2 * size - 1, top + h + 2 * size - 1);
+
+    // A drop curtain hangs from whatever is above it, so its top corners
+    // join that line rather than turning away from it.
+    let (tl, tr) = if view.border_shape == Some(BorderShape::DropCurtain) {
+        (glyph::TEE_RIGHT, glyph::TEE_LEFT)
+    } else {
+        (glyph::TOP_LEFT, glyph::TOP_RIGHT)
+    };
+
+    put_cell(screen, left, top, tl, area);
+    put_cell(screen, right, top, tr, area);
+    put_cell(screen, left, bottom, glyph::BOTTOM_LEFT, area);
+    put_cell(screen, right, bottom, glyph::BOTTOM_RIGHT, area);
+    for column in (left + 1)..right {
+        put_cell(screen, column, top, glyph::HORIZONTAL, area);
+        put_cell(screen, column, bottom, glyph::HORIZONTAL, area);
+    }
+    for row in (top + 1)..bottom {
+        put_cell(screen, left, row, glyph::VERTICAL, area);
+        put_cell(screen, right, row, glyph::VERTICAL, area);
     }
 }
 
@@ -176,6 +245,10 @@ impl Registry {
             draw_separator(screen, &vb.view, area);
         }
         for vb in &above {
+            // Border first: it rings the view rather than overlapping it,
+            // but drawing it first keeps a neighbouring window's content
+            // from being clipped by our frame.
+            draw_border(screen, &vb.view, area);
             blit_view(screen, vb, area);
         }
     }
@@ -207,6 +280,8 @@ mod tests {
             use_modeline: None,
             kind,
             content_type: ViewType::Editor,
+            border: None,
+            border_shape: None,
         }
     }
 
@@ -375,6 +450,90 @@ mod tests {
             "floating wins over the separator"
         );
         assert_eq!(screen[(2, 1)].symbol(), "\u{2502}", "still drawn below it");
+    }
+
+    fn floating(id: u64, x: u16, y: u16, w: u16, h: u16) -> View {
+        let mut v = view(id, x, y, w, h, ViewKind::Floating);
+        v.border = Some(1);
+        v
+    }
+
+    #[test]
+    fn a_floating_window_is_ringed_by_a_box() {
+        // The border sits outside the view: a 2x1 view at (2,2) is ringed
+        // by a box from (1,1) to (4,3).
+        let mut registry = Registry::default();
+        registry.insert(floating(1, 2, 2, 2, 1));
+        fill(&mut registry, 1, 'f');
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        registry.composite(&mut screen);
+
+        assert_eq!(screen[(1, 1)].symbol(), "\u{256d}", "top left");
+        assert_eq!(screen[(4, 1)].symbol(), "\u{256e}", "top right");
+        assert_eq!(screen[(1, 3)].symbol(), "\u{2570}", "bottom left");
+        assert_eq!(screen[(4, 3)].symbol(), "\u{256f}", "bottom right");
+        assert_eq!(screen[(2, 1)].symbol(), "\u{2500}", "top edge");
+        assert_eq!(screen[(1, 2)].symbol(), "\u{2502}", "left edge");
+        assert_eq!(screen[(2, 2)].symbol(), "f", "content survives");
+    }
+
+    #[test]
+    fn a_drop_curtain_joins_what_is_above_it() {
+        let mut registry = Registry::default();
+        let mut v = floating(1, 2, 2, 2, 1);
+        v.border_shape = Some(BorderShape::DropCurtain);
+        registry.insert(v);
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(1, 1)].symbol(), "\u{251c}", "top left tees right");
+        assert_eq!(screen[(4, 1)].symbol(), "\u{2524}", "top right tees left");
+        assert_eq!(
+            screen[(1, 3)].symbol(),
+            "\u{2570}",
+            "bottom corners unchanged"
+        );
+    }
+
+    #[test]
+    fn a_left_border_is_a_rule_not_a_box() {
+        let mut registry = Registry::default();
+        let mut v = floating(1, 2, 2, 2, 2);
+        v.border_shape = Some(BorderShape::LeftBorder);
+        registry.insert(v);
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(1, 2)].symbol(), "\u{2502}");
+        assert_eq!(screen[(1, 3)].symbol(), "\u{2502}");
+        assert_eq!(screen[(1, 1)].symbol(), " ", "no box above");
+        assert_eq!(screen[(4, 2)].symbol(), " ", "nothing on the right");
+    }
+
+    #[test]
+    fn a_border_against_the_screen_edge_is_clipped_not_wrapped() {
+        // A window at (0,0) puts its border at -1; those cells must be
+        // dropped rather than wrapping onto the far side.
+        let mut registry = Registry::default();
+        registry.insert(floating(1, 0, 0, 3, 1));
+        fill(&mut registry, 1, 'f');
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 4));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(0, 0)].symbol(), "f", "content still drawn");
+        assert_eq!(screen[(3, 0)].symbol(), "\u{2502}", "right edge lands");
+        assert_eq!(screen[(0, 1)].symbol(), "\u{2500}", "bottom edge lands");
+        assert_eq!(screen[(5, 3)].symbol(), " ", "nothing wrapped");
+    }
+
+    #[test]
+    fn a_view_without_a_border_gets_none() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 2, 2, 2, 1, ViewKind::Floating));
+        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(1, 1)].symbol(), " ");
     }
 
     #[test]
