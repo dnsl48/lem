@@ -1,6 +1,8 @@
 # 0001. Reuse the `lem-server` JSON-RPC protocol
 
 **Status:** Accepted — September 2026
+**Revisited by:** [0006](0006-stay-on-lem-server-for-now.md), which re-examines
+this choice against measurements taken once the protocol was actually run.
 
 ## Context
 
