@@ -4,9 +4,10 @@
 //! `lem-server` JSON-RPC protocol over stdio, paints the frames it is
 //! sent into per-view cell buffers, composites them, and draws.
 //!
-//! Status: rendering, keyboard input and reflow on resize.
+//! Status: rendering, keyboard input, reflow on resize and clipboard.
 
 mod child;
+mod clipboard;
 mod input;
 mod metrics;
 mod paint;
@@ -117,6 +118,7 @@ fn main() -> Result<()> {
 
     // `_lem` is held only for its Drop, which kills and reaps the child.
     let (_lem, mut reader, mut writer) = child::Lem::spawn(&program, &log)?;
+    let mut clipboard = clipboard::Clipboard::new();
     let mut registry = Registry::default();
 
     // The reader blocks, and the main loop must also watch the terminal,
@@ -223,6 +225,20 @@ fn main() -> Result<()> {
                                 return Ok(());
                             }
                         }
+                    }
+                }
+                // Lem waits only 0.1s for this before giving up, so it
+                // is answered inline rather than handed to a thread.
+                Incoming::Notification { method, .. } if method == "get-clipboard-text" => {
+                    let text = clipboard.get();
+                    writer.send(&rpc::notification(
+                        "got-clipboard-text",
+                        serde_json::json!({ "text": text }),
+                    )?)?;
+                }
+                Incoming::Notification { method, params } if method == "set-clipboard-text" => {
+                    if let Some(text) = params.get("text").and_then(|value| value.as_str()) {
+                        clipboard.set(text);
                     }
                 }
                 _ => {}
