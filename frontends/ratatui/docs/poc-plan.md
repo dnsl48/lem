@@ -61,6 +61,17 @@ with `ratatui-core`, `ratatui-crossterm`, `crossterm`, `serde`,
 - **Paths in `Files:` blocks are relative to `frontends/ratatui/`.** Shell
   commands state their own working directory; `qlot` and `sbcl` commands
   run from the repo root, `cargo` commands from `frontends/ratatui/rust/`.
+- **The login handshake has two mandatory parts.** `login` must carry
+  non-nil `foreground` and `background` — omit them and the editor
+  silently stops emitting forever (protocol-notes section 11) — and the
+  client must follow the login *response* with a `redraw` notification
+  before any frame arrives.
+- **Drive the editor with `LEM_HOME` pointed at a scratch directory,
+  trailing slash included.** A real profile can block startup on an
+  interactive config-migration prompt.
+- **When the display half goes quiet, read `<lem-home>/debug.log`.**
+  Redraw errors are swallowed by `with-display-error` and logged there,
+  never to stderr. The process will look healthy.
 - **Rust gates:** `cargo test`, `cargo clippy --all-targets` (no
   warnings) and `cargo fmt --all --check` pass before every commit.
 
@@ -85,10 +96,14 @@ with `ratatui-core`, `ratatui-crossterm`, `crossterm`, `serde`,
 - Dependencies resolved: `ratatui-core 0.1.2`, `ratatui-crossterm 0.1.2`,
   `crossterm 0.29`, `serde 1.0.229`, `serde_json 1.0.151`, `anyhow 1.0`.
 
+- **Task 1.** The Lisp half builds, emits frames, and a real capture is
+  committed as a test fixture. See the task below for the eight things
+  that had to be discovered to get there.
+
 ### Left
 
-Tasks 1-10 below. Task 1 is the only one that unblocks the rest; Tasks 4
-and 5 are pure logic and can be done in any order relative to 2 and 3.
+Tasks 2-10 below. Tasks 4 and 5 are pure logic and can be done in any
+order relative to 2 and 3.
 
 ---
 
@@ -96,9 +111,10 @@ and 5 are pure logic and can be done in any order relative to 2 and 3.
 
 | File | Responsibility |
 |---|---|
-| `lisp/main.lisp` *(modify)* | stdout muffling; stdio entry point |
-| `lisp/transport.lisp` *(create, only if Task 1 Step 2 requires it)* | stdio transport override giving the wire an explicit stream |
-| `build.lisp` *(create)* | `save-lisp-and-die` the Lisp half |
+| `lisp/main.lisp` *(done)* | stdio entry point |
+| `lisp/transport.lisp` *(done)* | protocol streams, runner, debug logging |
+| `lisp/jsonrpc-stdio-fixes.lisp` *(done)* | three fixes to jsonrpc's stdio transport |
+| `build.lisp` *(done)* | `save-lisp-and-die` the Lisp half |
 | `rust/crates/lem-protocol/src/lib.rs` *(modify)* | add `View`, `Clear`, `MoveCursor`, `Size`, `LoginParams`, `KeyInput` |
 | `rust/crates/lem-protocol/src/framing.rs` *(create)* | `Content-Length` read/write over any `BufRead`/`Write` |
 | `rust/crates/lem-protocol/src/rpc.rs` *(create)* | JSON-RPC envelope: `Notification`, `Request`, `Response` |
@@ -112,209 +128,56 @@ and 5 are pure logic and can be done in any order relative to 2 and 3.
 
 ---
 
-### Task 1: Lisp half builds and emits frames
+### Task 1: Lisp half builds and emits frames — **DONE**
 
-Nothing downstream can be tested against real data until this produces
-bytes. The deliverable is a captured frame on disk that later tasks use
-as a test fixture.
+Completed 2026-09-20. It cost far more than planned: server-side stdio
+had never been exercised in this ecosystem and carried three defects, and
+the startup handshake has two undocumented requirements. All of it is
+written up in [`../protocol-notes.md`](../protocol-notes.md) sections
+11-13.
 
-**Files:**
-- Modify: `lisp/main.lisp`
-- Create: `build.lisp`
-- Create: `lisp/transport.lisp` *(only if Step 2 requires it)*
-- Modify: `lem-ratatui.asd` *(only if `transport.lisp` is added)*
-- Create: `rust/crates/lem-protocol/tests/fixtures/frame.jsonl`
+**Files created or modified (all inside `frontends/ratatui/`):**
+- `lisp/transport.lisp` — protocol streams held apart from
+  `*standard-output*`, a `stdio-runner` passing them to the transport,
+  env-gated debug logging and a backtrace watchdog
+- `lisp/jsonrpc-stdio-fixes.lisp` — the three transport fixes
+- `lisp/main.lisp` — entry point
+- `lem-ratatui.asd`, `build.lisp`, `.gitignore`
+- `rust/crates/lem-protocol/tests/fixtures/frame.jsonl` — 9 messages
+  captured from a real editor
 
-**Interfaces:**
-- Produces: a `lem-ratatui` executable that speaks `Content-Length`-framed
-  JSON-RPC on stdin/stdout; a captured first-frame fixture.
+**What was learned, in the order it bit:**
 
-- [ ] **Step 1: Install dependencies**
+1. `sb-ext:disable-debugger` and redirecting `*terminal-io*` are both
+   required. SBCL's debugger writes to `*terminal-io*`, not
+   `*standard-output*`, so muffling stdout alone still lets a banner go
+   down the wire.
+2. A `defvar` reading `uiop:getenv` is evaluated at **build** time and
+   baked into the image by `save-lisp-and-die`. Environment must be read
+   at startup.
+3. jsonrpc's stdio transport never calls `on-open-connection`, so
+   `broadcast` silently drops every notification while request/response
+   still works.
+4. `lem-server`'s `jsonrpc-stdio-patch.lisp` references three undefined
+   functions and would error on first use.
+5. `login` must carry non-nil `foreground`/`background` or every
+   `update-display` dies on an unbound slot, swallowed by
+   `with-error-handler`. The editor stays up and emits nothing.
+6. The client must send `redraw` after the login response to get a first
+   frame.
+7. `LEM_HOME` needs a trailing slash, and a real profile can block startup
+   on an interactive `y/n` config-migration prompt.
+8. Redraw errors go to `<lem-home>/debug.log`, never to stderr.
 
-```bash
-qlot install
-```
+**Verification:** driving the built binary with login + redraw produced
+41KB across 9 messages, containing `make-view`, `put`, `modeline-put`,
+`clear-eol`, `clear-eob`, `move-cursor`, `resize-view`, `move-view`,
+`change-view`, `redraw-view-after` and `update-display`.
 
-- [ ] **Step 2: Establish which stream the transport writes to**
-
-`*standard-output*` is both the protocol wire and where stray editor
-output goes, and those cannot be the same stream. The muffling strategy
-depends on how `jsonrpc/transport/stdio` acquires its stream, which is
-only readable after `qlot install`:
-
-```bash
-sed -n '1,80p' .qlot/dists/quicklisp/software/jsonrpc*/transport/stdio.lisp \
-  2>/dev/null || find .qlot -path '*jsonrpc*' -name 'stdio.lisp' -exec sed -n '1,80p' {} +
-```
-
-Look for where the connection's socket is set. Two outcomes:
-
-- **It captures `*standard-output*` when the transport starts.** Then
-  muffling must not wrap `server-listen`. Bind the null stream only
-  around the editor, and leave the transport's own dynamic extent alone.
-- **It uses `sb-sys:*stdout*`, an explicit fd, or a stored slot.** Then
-  `*standard-output*` is free, and Step 3's rebinding is safe as written.
-
-Record which one in a comment above `main`. Step 6's capture is the test
-that proves it: an empty capture means the protocol went to the null
-stream.
-
-If that happens, **do not edit
-`frontends/server/jsonrpc-stdio-patch.lisp`.** Override the same method
-from our own folder instead — it loads after `lem-server`, because we
-depend on it, so ours wins. Create
-`frontends/ratatui/lisp/transport.lisp`:
-
-```lisp
-(defpackage :lem-ratatui/transport
-  (:use :cl)
-  (:export :*protocol-output*))
-(in-package :lem-ratatui/transport)
-
-(defvar *protocol-output* nil
-  "The real stdout, captured before `*standard-output*' is muffled.
-
-Under --mode=stdio the protocol and any stray editor output would
-otherwise share one stream, and they cannot: muffling `*standard-output*'
-to protect the wire also silences the wire. `main' captures the true
-stdout here before rebinding, and the transport override below writes to
-it rather than to whatever `*standard-output*' happens to be.")
-
-;;; Overrides `lem-server''s own override of this method
-;;; (frontends/server/jsonrpc-stdio-patch.lisp). Copy that method body
-;;; verbatim and change only the stream it writes to; keeping the bodies
-;;; otherwise identical is what makes a later upstream divergence
-;;; visible on inspection.
-(defmethod jsonrpc/transport/stdio::send-message-using-transport
-    ((transport jsonrpc/transport/stdio::stdio-transport) connection message)
-  (let ((json (babel:string-to-octets
-               (with-output-to-string (s)
-                 (yason:encode message s))))
-        (stream (or *protocol-output*
-                    (jsonrpc/transport/stdio::connection-socket connection))))
-    (format stream "Content-Length: ~A~C~C~:*~:*~C~C"
-            (length json)
-            #\Return
-            #\Newline)
-    (write-sequence json stream)
-    (force-output stream)))
-```
-
-Then add it to `lem-ratatui.asd` **before** `main`, and set
-`lem-ratatui/transport:*protocol-output*` from `main` in Step 3:
-
-```lisp
-  :components ((:file "implementation")
-               (:file "transport")
-               (:file "main")))
-```
-
-Two monkey-patches stacked on one generic function is acceptable for a
-PoC and bad permanently. The real fix is the upstream change already
-recorded in the README: teach `run-stdio-server` an `:interface`
-argument and an explicit output stream, which deletes both this override
-and the `lem-server::` internals coupling.
-
-- [ ] **Step 3: Rebind `*standard-output*` so it cannot corrupt the wire**
-
-Apply the branch chosen in Step 2. Where the transport does *not* capture
-`*standard-output*`, the body of `main` in `lisp/main.lisp` becomes:
-
-```lisp
-(defun main (&optional (args (uiop:command-line-arguments)))
-  "Run Lem with the Ratatui frontend, serving JSON-RPC over stdio.
-
-Intended to be spawned as a child process by the Rust display binary,
-which owns the terminal: this process's stdout carries protocol traffic,
-not output for a human, so it must never be attached to a TTY.
-
-`lem-server' internals are used here because the exported
-`lem-server:run-stdio-server' hardcodes --interface JSONRPC and so cannot
-select another implementation. Teaching it an :interface argument is the
-right fix and should be proposed upstream; until then this duplicates its
-three lines."
-  (let* ((protocol-stream *standard-output*)
-         (null-stream (make-broadcast-stream))
-         (*standard-output* null-stream)
-         (*trace-output* null-stream)
-         (lem-server::*server-runner*
-           (make-instance 'lem-server::stdio-server-runner)))
-    ;; Only consumed by the Step 2 override; harmless when unused.
-    (setf lem-ratatui/transport:*protocol-output* protocol-stream)
-    (lem-server::init)
-    (apply #'lem:lem (append args (list "--interface" "RATATUI")))))
-```
-
-- [ ] **Step 4: Write the build script**
-
-Create `frontends/ratatui/build.lisp` — in our folder, not `scripts/`,
-so the PoC stays self-contained:
-
-```lisp
-(ql:quickload :lem-ratatui)
-
-(lem:init-at-build-time)
-
-(sb-ext:save-lisp-and-die "lem-ratatui-lisp"
-                          :toplevel #'lem-ratatui:main
-                          :executable t)
-```
-
-- [ ] **Step 5: Build and verify the implementation is discoverable**
+Reproduce with:
 
 ```bash
-sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
-```
-
-Expected: a `lem-ratatui-lisp` binary in the repo root. If the build
-errors with "Implementation does not exist", the `ratatui` class is not a
-*direct* subclass of `lem-core:implementation` — see the docstring in
-`lisp/implementation.lisp`.
-
-- [ ] **Step 6: Capture a real frame**
-
-The child expects a `login` request before it emits anything. Send one
-and record what comes back:
-
-```bash
-printf 'Content-Length: 102\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"login","params":{"size":{"width":80,"height":24},"foreground":null}}' \
-  | ./lem-ratatui-lisp 2>/tmp/lem-ratatui.log \
-  | head -c 200000 > /tmp/first-frame.raw
-wc -c /tmp/first-frame.raw
-```
-
-Expected: a non-empty capture containing `"method":"bulk"`. If it is
-empty, read `/tmp/lem-ratatui.log`.
-
-- [ ] **Step 7: Extract the first bulk frame as a fixture**
-
-```bash
-mkdir -p frontends/ratatui/rust/crates/lem-protocol/tests/fixtures
-python3 - <<'PY'
-import re, json
-raw = open('/tmp/first-frame.raw','rb').read()
-out = []
-while True:
-    m = re.match(rb'Content-Length: (\d+)\r\n\r\n', raw)
-    if not m: break
-    n = int(m.group(1)); body = raw[m.end():m.end()+n]
-    raw = raw[m.end()+n:]
-    out.append(json.loads(body))
-path = 'frontends/ratatui/rust/crates/lem-protocol/tests/fixtures/frame.jsonl'
-with open(path, 'w') as f:
-    for msg in out:
-        f.write(json.dumps(msg) + '\n')
-print(f"{len(out)} messages ->", path)
-PY
-```
-
-Expected: at least one message, with `bulk` among the methods.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add frontends/ratatui/
-git commit -m "feat(ratatui): build the Lisp half and capture a protocol fixture"
+LEM_HOME=/tmp/lem-scratch/ ./frontends/ratatui/lem-ratatui-lisp
 ```
 
 ---

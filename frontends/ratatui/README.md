@@ -61,8 +61,23 @@ docs/
 ## Building
 
 ```bash
-cd rust && cargo test        # works today
+cd rust && cargo test                    # Rust half
+
+# Lisp half: build, then drive it by hand
+qlot install
+sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
 ```
+
+Point `LEM_HOME` at a scratch directory when driving it by hand — note
+the **trailing slash**, which `merge-pathnames` requires:
+
+```bash
+LEM_HOME=/tmp/lem-scratch/ ./frontends/ratatui/lem-ratatui-lisp
+```
+
+Set `LEM_RATATUI_DEBUG=1` for transport logging on stderr, and
+`LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
+seconds when the editor appears stuck.
 
 There is deliberately no `make ratatui` target and no `lem.asd`
 registration yet — neither is useful until the display half does
@@ -101,3 +116,12 @@ occlusion repair for free. See
   [`docs/adr/0005`](docs/adr/0005-stdio-as-the-default-transport.md).
 - No protocol version exchange at `login`. Two separately installed
   binaries can drift; needed before this ships to users, not for the PoC.
+- `lisp/jsonrpc-stdio-fixes.lisp` works around three defects in jsonrpc's
+  stdio server transport, one of which (`lem-server`'s own
+  `jsonrpc-stdio-patch.lisp` referencing three undefined functions) is a
+  live bug in the tree. All three deserve upstream reports; see
+  [`docs/protocol-notes.md`](docs/protocol-notes.md) section 13.
+- The display half must send non-nil `foreground`/`background` in `login`,
+  or the editor silently stops emitting. That is a robustness bug in
+  `lem-server` — the slots have no `:initform` — that we work around
+  rather than fix. Section 11 of the protocol notes has the detail.
