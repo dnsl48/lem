@@ -137,6 +137,10 @@ Nothing here is required for the PoC; each is its own piece of work.
 - **Report the three jsonrpc stdio defects upstream**, and the two
   `lem-server` handshake traps.
 - **Popups, mouse, clipboard, images** — all stubbed `lem-if` methods.
+- **Find more geometry bugs by reconstructing the screen.** The modeline
+  rendered in the wrong row for six tasks because acceptance only checked
+  that its text was present. Replaying the escape stream into a virtual
+  screen and reading it row by row catches what substring checks cannot.
 - **Cursor shape and position** — `move-cursor` is currently ignored; the
   cursor renders only as Lem's own reverse-video cell.
 

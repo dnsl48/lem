@@ -66,9 +66,14 @@ fn apply_frame(registry: &mut Registry, bulk: Bulk) -> bool {
             Instruction::DeleteView(arg) => registry.remove(arg.view_info.id),
             Instruction::ResizeView(r) => registry.resize(r.view_info.id, r.width, r.height),
             Instruction::MoveView(m) => registry.move_to(m.view_info.id, m.x, m.y),
-            Instruction::Put(p) | Instruction::ModelinePut(p) => {
+            Instruction::Put(p) => {
                 if let Some(vb) = registry.get_mut(p.view_info.id) {
                     paint::put(vb, &p);
+                }
+            }
+            Instruction::ModelinePut(p) => {
+                if let Some(vb) = registry.get_mut(p.view_info.id) {
+                    paint::modeline_put(vb, &p);
                 }
             }
             Instruction::ClearEol(c) => {
