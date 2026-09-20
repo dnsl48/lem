@@ -93,14 +93,29 @@ frame budget; the whole session spent about 65ms decoding. A faster codec
 would be optimising something that costs nothing. The decision to keep
 JSON stands, and now stands on numbers.
 
-**The idle frame rate is the more interesting result.** 960 frames across
-roughly 25 seconds is about 38 frames per second, and the session was
-idle for most of it — the cursor blink and modeline clock emit a frame
-each regardless of input. At ~3KB a frame that is a sustained ~120 KB/s
-and a constant wakeup for both processes with nothing on screen changing.
-If anything here deserves attention before the codec, it is that: the
-levers in this record shrink each frame, but not sending an unchanged
-frame at all would beat any of them.
+**Frame *amplification* is the more interesting result.** An earlier
+version of this section read 38 frames/sec out of the number above and
+attributed it to cursor blink and a modeline clock. That was wrong — it
+divided one mixed workload by its wall time. Measured directly:
+
+```
+idle, clean buffer     ~0.0 frames/sec   (Lem is genuinely quiet)
+idle, modified buffer  ~3.2 frames/sec
+typing                 ~13 frames per keystroke
+```
+
+So the frames follow activity, not idleness, and the cost is one
+keystroke producing a dozen frames. `lem-if:render-line-on-modeline`
+(`frontends/server/main.lisp:737`) is a large part of it: every frame it
+emits a full-width blank `modeline-put` followed by every modeline
+object, unconditionally and with no caching, which is exactly the
+12-instruction frames seen when the editor is doing nothing of substance.
+
+If anything here deserves attention before the codec it is that — and
+unlike the levers listed below, it does not need `lem-server` to change:
+`render-line-on-modeline` and `update-display` are generics, and a method
+specialised on our own implementation class is strictly more specific
+than `lem-server`'s. See `../poc-plan.md`.
 
 ### What was *not* measured
 
