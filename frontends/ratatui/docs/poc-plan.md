@@ -1444,7 +1444,35 @@ git commit -m "feat(ratatui): apply protocol frames and draw the composited scre
 
 ---
 
-### Task 7: Input
+### Task 7: Input — **DONE**
+
+Completed 2026-09-20. **It is an editor now, not a viewer.** 50 tests,
+gates clean.
+
+End-to-end under a pty, with an explicit `TIOCSWINSZ`:
+
+- `C-x C-f`, a path, `RET` — the minibuffer prompt rendered with the path
+  visible, which also exercises floating-window compositing
+- typing inserted text
+- `C-x C-s` saved; **the file on disk contained exactly the typed string**
+- `C-x C-c` exited with status 0, which is what proves the key encoding
+  matches Lem's bindings rather than merely reaching it
+- typing into the read-only dashboard produced Lem's `read-only` message
+
+**A weak assertion worth not repeating:** checking for the typed string in
+the terminal byte stream fails, because ratatui diffs per cell — each
+character is written on its own, interleaved with cursor moves, so the
+string never appears contiguously. Assert on effects (a saved file, an
+exit status, an echo-area message), not on the raw stream.
+
+**Deviations:** `serde` needed adding to `lem-ratatui` as a direct
+dependency, the same gap as `serde_json` in Task 3. The `Lem::split`
+refactor the plan anticipated became `Lem::spawn` returning a
+`(Lem, LemReader, LemWriter)` triple — the `Lem` handle is held only for
+its `Drop`, which kills and reaps, so the reader can move to its own
+thread while the main loop keeps the writer.
+
+### Task 7 (as planned): Input
 
 **Files:**
 - Create: `rust/crates/lem-ratatui/src/input.rs`

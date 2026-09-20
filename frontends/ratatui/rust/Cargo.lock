@@ -276,6 +276,7 @@ dependencies = [
  "lem-protocol",
  "ratatui-core",
  "ratatui-crossterm",
+ "serde",
  "serde_json",
 ]
 
