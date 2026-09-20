@@ -125,7 +125,19 @@ typing                 ~13 frames per keystroke
 
 Lem is quiet when idle. One keystroke producing a dozen frames is the
 cost worth attacking, and `render-line-on-modeline` repainting the whole
-modeline unconditionally every frame is a large part of it.
+modeline unconditionally every frame was a large part of it.
+
+`lisp/modeline.lisp` memoises it — sending the modeline only when it
+differs from the last one sent. On a fixed workload that cut total wire
+traffic by **54%** and average frame size by **46%**, with no change to
+`lem-server` and no monkey-patching: both hooks are generic functions,
+so specialising on our own implementation class is ordinary extension.
+
+## Acceptance
+
+```bash
+python3 scripts/acceptance.py      # the 8-point script, needs both halves built
+```
 
 ## Next steps
 
