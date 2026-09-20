@@ -114,10 +114,18 @@ save, quit):
 
 Decoding is 0.4% of a 16.7ms frame budget, which is why
 [`docs/adr/0003`](docs/adr/0003-keep-json-codec-for-now.md) keeps JSON.
-The notable number is the *idle* frame rate — roughly 38 frames a second
-with nothing happening, because cursor blink and the modeline clock each
-emit one. Not sending unchanged frames would beat every byte-level lever
-in that record.
+
+The notable number is frame *amplification*, not idle churn:
+
+```
+idle, clean buffer     ~0.0 frames/sec
+idle, modified buffer  ~3.2 frames/sec
+typing                 ~13 frames per keystroke
+```
+
+Lem is quiet when idle. One keystroke producing a dozen frames is the
+cost worth attacking, and `render-line-on-modeline` repainting the whole
+modeline unconditionally every frame is a large part of it.
 
 ## Next steps
 

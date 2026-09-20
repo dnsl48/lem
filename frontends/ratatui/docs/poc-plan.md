@@ -1818,10 +1818,12 @@ avg 3,131 B, max 17,234 B, avg decode 68us`.
 Decoding is 0.4% of a 16.7ms frame budget, so ADR 0003's deferral holds —
 on evidence now rather than expectation.
 
-**The unexpected result is the idle frame rate.** 960 frames in ~25
-seconds is ~38 per second, mostly idle: cursor blink and modeline clock
-emit a frame each regardless of input. Not sending unchanged frames would
-beat every byte-level lever in ADR 0003.
+**A conclusion recorded here was wrong and has been corrected.** This
+task first reported ~38 idle frames/sec from cursor blink and a modeline
+clock, by dividing one mixed workload by its wall time. Measured
+directly: idle with a clean buffer is ~0/sec, idle with a modified buffer
+~3.2/sec, and typing costs ~13 frames per keystroke. Frames follow
+activity, not idleness.
 
 **Scope honesty:** this measures the Rust *decode* side only. The Lisp
 *encode* side — where the upstream perf commits were — is not
