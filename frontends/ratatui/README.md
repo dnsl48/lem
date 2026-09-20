@@ -99,6 +99,14 @@ Verified against a real editor under a pty:
 | Resize | 60→100 columns paints to 100, 100→60 paints to 60 |
 | `C-x C-c` | exits 0, raw mode and the alternate screen released |
 | Killing Lem | the display half exits 0 and still restores the terminal |
+| Splits | `C-x 3` and `C-x 2` render with `│` separators, nested |
+| UTF-8 input | `café naïve 日本語 🔥 żółć` round-trips byte-exact |
+| Completion popups | composite over the buffer, borderless as the browser draws them |
+
+Window splits get a `│` separator in the column Lem reserves through
+`:window-left-margin`, spanning the modeline row — matching the browser
+client's `VerticalBorder`. Horizontal splits need none: each pane's
+modeline already delimits it.
 
 Wide characters work — Lem's startup modeline contains U+1F512, and
 `ratatui-core`'s buffer advances by display width.
@@ -156,7 +164,12 @@ Nothing here is required for the PoC; each is its own piece of work.
   PoC completion as an explicit trigger to revisit.
 - **Report the three jsonrpc stdio defects upstream**, and the two
   `lem-server` handshake traps.
-- **Popups, mouse, clipboard, images** — all stubbed `lem-if` methods.
+- **Clipboard** — `clipboard-paste` dequeues with a 0.1s timeout, so an
+  unanswered `get-clipboard-text` costs a stall and pastes nothing rather
+  than hanging. Answering it needs OSC 52 or a crate like `arboard`.
+- **Mouse, images, popup menus** — stubbed `lem-if` methods. Mouse
+  capture being off means terminal-native selection still works.
+- **`update-cursor-shape`** — no bar or underline cursor styles.
 - **Find more geometry bugs by reconstructing the screen.** The modeline
   rendered in the wrong row for six tasks because acceptance only checked
   that its text was present. Replaying the escape stream into a virtual
