@@ -664,7 +664,34 @@ git commit -m "feat(ratatui): spawn Lem as a child and guard the terminal"
 
 ---
 
-### Task 4: View registry and z-order compositing
+### Task 4: View registry and z-order compositing — **DONE**
+
+Completed 2026-09-20. 9 tests, gates clean.
+
+Three things the plan had wrong, all caught by looking at the capture
+before writing the type:
+
+- **`resize-view` and `move-view` are not `View`s.** They carry
+  `{viewInfo, width, height}` and `{viewInfo, x, y}` respectively. The
+  earlier amendment to Task 6 claiming otherwise was wrong and has been
+  corrected above; the registry grew `resize` and `move_to` instead.
+- **`use_modeline` arrives as `null`**, not absent. `#[serde(default)]`
+  on a plain `bool` rejects an explicit null, so the field is
+  `Option<bool>` with a `has_modeline()` accessor.
+- **Lem's tabbar is an html view.** The capture's view 2 is
+  `kind: header, type: html`, 80x2 at the top of the screen. A terminal
+  cannot paint it, and blitting its empty buffer would blank the rows
+  beneath, so `composite` skips html views while the registry still
+  tracks them.
+
+`Registry` is `insert` / `remove` / `get_mut` / `resize` / `move_to` /
+`composite`, with layer order tile, header, floating — independent of
+insertion order. Views are clipped to the screen rather than panicking.
+
+**Verified:** the real views decode out of the committed capture with
+correct geometry, kind, type and modeline flag.
+
+### Task 4 (as planned): View registry and z-order compositing
 
 Pure logic, no TTY, no child process. This is the piece with no
 equivalent in the browser display half (`protocol-notes.md` section 7).
@@ -908,22 +935,10 @@ git commit -m "feat(ratatui): view registry with z-order compositing"
   `paint::clear_eol(&mut ViewBuffer, x: u16, y: u16)`,
   `paint::clear_eob(&mut ViewBuffer, y: u16)`.
 
-- [ ] **Step 1: Add the `Clear` argument type**
+- [ ] **Step 1: ~~Add the `Clear` argument type~~ — already done in Task 4**
 
-Append to `rust/crates/lem-protocol/src/lib.rs`:
-
-```rust
-/// Argument of `clear`, `clear-eol` and `clear-eob`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Clear {
-    pub view_info: ViewInfo,
-    #[serde(default)]
-    pub x: u16,
-    #[serde(default)]
-    pub y: u16,
-}
-```
+`Clear`, `ViewInfoArg`, `ResizeView` and `MoveView` were all added to
+`lem-protocol` while building the view types. Nothing to do here.
 
 - [ ] **Step 2: Write the failing paint tests**
 
@@ -961,14 +976,15 @@ pub fn clear_eob(vb: &mut ViewBuffer, y: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lem_protocol::{View, ViewInfo, ViewKind};
+    use lem_protocol::{View, ViewInfo, ViewKind, ViewType};
     use ratatui_core::buffer::Buffer;
     use ratatui_core::layout::Rect;
 
     fn view_buffer(w: u16, h: u16) -> ViewBuffer {
         ViewBuffer {
             view: View { id: 1, x: 0, y: 0, width: w, height: h,
-                         use_modeline: false, kind: ViewKind::Tile },
+                         use_modeline: None, kind: ViewKind::Tile,
+                         content_type: ViewType::Editor },
             buffer: Buffer::empty(Rect::new(0, 0, w, h)),
         }
     }
@@ -1189,8 +1205,8 @@ pub enum Instruction {
     ClearEol(Clear),
     ClearEob(Clear),
     MoveCursor(MoveCursor),
-    ResizeView(View),
-    MoveView(View),
+    ResizeView(ResizeView),
+    MoveView(MoveView),
     /// A method this display half does not implement.
     Other { method: String },
 }
@@ -1322,9 +1338,8 @@ fn apply_frame(registry: &mut Registry, bulk: Bulk) {
                     paint::clear_eob(vb, c.y);
                 }
             }
-            // Lem re-sends geometry on resize; insert replaces the view
-            // and reallocates its buffer at the new size (Task 8).
-            Instruction::ResizeView(view) | Instruction::MoveView(view) => registry.insert(view),
+            Instruction::ResizeView(r) => registry.resize(r.view_info.id, r.width, r.height),
+            Instruction::MoveView(m) => registry.move_to(m.view_info.id, m.x, m.y),
             Instruction::MoveCursor(_) | Instruction::Other { .. } => {}
         }
     }
