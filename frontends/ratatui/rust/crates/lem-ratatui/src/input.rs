@@ -29,6 +29,20 @@ pub fn convert(event: KeyEvent) -> Option<KeyPayload> {
         // Space is a named sym, not the character; convert-keyevent
         // special-cases it on the far side too.
         KeyCode::Char(' ') => "Space".to_string(),
+        // crossterm decodes the C0 controls 0x1C..0x1F as Ctrl+'4'..'7'
+        // — `(c - 0x1C + b'4')` in its unix parser — but ASCII names
+        // those bytes C-\ C-] C-^ C-_, and so does Lem
+        // (`frontends/ncurses/key.lisp`). C-_ is bound to redo, so
+        // passing the digit through breaks a documented binding.
+        //
+        // The two are indistinguishable on the wire: a terminal sends
+        // 0x1C for both Ctrl+4 and C-\. The ASCII reading is the one
+        // Lem binds, so it wins. Enabling the kitty keyboard protocol
+        // would disambiguate them and this would need revisiting.
+        KeyCode::Char(digit @ ('4'..='7')) if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            const NAMES: [&str; 4] = ["\\", "]", "^", "_"];
+            NAMES[digit as usize - '4' as usize].to_string()
+        }
         KeyCode::Char(c) => c.to_string(),
         KeyCode::Enter => "Return".to_string(),
         KeyCode::Tab | KeyCode::BackTab => "Tab".to_string(),
@@ -147,6 +161,27 @@ mod tests {
         let payload = key(KeyCode::BackTab, KeyModifiers::NONE).unwrap();
         assert_eq!(payload.key, "Tab");
         assert!(payload.shift);
+    }
+
+    #[test]
+    fn the_c0_controls_keep_their_ascii_names() {
+        // crossterm reports bytes 0x1C..0x1F as Ctrl+'4'..'7' — see
+        // parse_event in its unix parser — but ASCII and Lem both call
+        // them C-\ C-] C-^ C-_. C-_ is bound to redo, so getting this
+        // wrong breaks a documented binding.
+        for (reported, expected) in [('4', "\\"), ('5', "]"), ('6', "^"), ('7', "_")] {
+            let payload = key(KeyCode::Char(reported), KeyModifiers::CONTROL).unwrap();
+            assert_eq!(payload.key, expected, "Ctrl+{reported}");
+            assert!(payload.ctrl);
+        }
+    }
+
+    #[test]
+    fn digits_without_control_are_left_alone() {
+        assert_eq!(
+            key(KeyCode::Char('4'), KeyModifiers::NONE).unwrap().key,
+            "4"
+        );
     }
 
     #[test]
