@@ -198,6 +198,8 @@ Nothing here is required for the PoC; each is its own piece of work.
 - **Mouse, images, popup menus** — stubbed `lem-if` methods. Mouse
   capture being off means terminal-native selection still works.
 - **`update-cursor-shape`** — no bar or underline cursor styles.
+- **No tabbar.** Lem's is html-only; a terminal-native one would have to
+  be written, and would be a feature rather than a port.
 - **Find more geometry bugs by reconstructing the screen.** The modeline
   rendered in the wrong row for six tasks because acceptance only checked
   that its text was present. Replaying the escape stream into a virtual
@@ -216,6 +218,22 @@ The two readings are indistinguishable on the wire — a terminal sends
 0x1C for both `Ctrl+4` and `C-\` — so the ASCII one wins because it is
 what Lem binds. Enabling the kitty keyboard protocol would separate them
 and this would need revisiting.
+
+## Tabbar
+
+`lem-server` enables a tabbar after init, implemented as an **html**
+header window. A terminal cannot paint html, so it would take two rows
+off the top of every buffer and show nothing in them. It is therefore off
+by default here:
+
+```lisp
+(setf lem/tabbar:*enable-tabbar-on-startup* nil)   ; done for you in lisp/main.lisp
+```
+
+`*after-init-hook*` runs after your init file, so setting it back to `T`
+there still works — it just renders nothing until a terminal-native
+tabbar exists. Compositing still skips html views, since an `html-buffer`
+can appear by other routes.
 
 ## Known gaps in the scaffold
 
