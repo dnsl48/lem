@@ -1971,7 +1971,38 @@ git commit -m "feat(ratatui): instrument frame size and decode time"
 
 ---
 
-### Task 10: MVP acceptance
+### Task 10: MVP acceptance — **DONE**
+
+Completed 2026-09-20. **8/8 acceptance checks pass.**
+
+| # | Check | Evidence |
+|---|---|---|
+| 1 | startup screen and modeline | `Welcome to Lem`, `Dashboard` rendered |
+| 2 | `C-x C-f` opens Lisp source | `lem.lisp` visible with `defpackage` |
+| 3 | syntax colours | 13 distinct truecolor foregrounds |
+| 4 | cursor keys move the point | `abc`, Left, Left, `X` saved as `aXbc` |
+| 5 | typing and undo | `C-x u` leaves nothing on disk |
+| 6 | resize reflows | grow paints to 100, shrink to 60 |
+| 7 | `C-x C-c` | exit 0, ICANON and ECHO restored |
+| 8 | killing Lem | exit 0, ICANON and ECHO restored |
+
+**Three harness bugs, not product bugs**, worth recording because each
+first presented as a failure:
+
+- `pkill -f 'ratatui/lem-ratatui-lisp$'` matched the *display half* too,
+  whose argv ends with that path, so the test killed what it was
+  observing and read SIGTERM as a crash. Find the child by PPID instead.
+- `C-/` is not what a terminal sends for undo. `C-x u` is unambiguous.
+- Scraping `line:col` out of the modeline diff finds nothing, because
+  only changed digits are repainted. Assert on effects — where the next
+  character lands — not on the rendered indicator.
+
+That is the third time in this plan an instrumentation bug has looked
+like a product failure (see Tasks 6 and 8). The pattern is consistent:
+assertions against the terminal byte stream are unreliable; assertions
+against disk contents, exit statuses and termios flags are not.
+
+### Task 10 (as planned): MVP acceptance
 
 **Files:**
 - Modify: `frontends/ratatui/README.md`
