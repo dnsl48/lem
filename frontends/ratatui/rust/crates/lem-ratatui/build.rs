@@ -22,7 +22,7 @@ mod bundle {
         let image = env::var_os("LEM_RATATUI_LISP").map_or_else(
             || {
                 PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-                    .join("../../../lem-ratatui-lisp")
+                    .join("../../../dist/lem-ratatui-lisp")
             },
             PathBuf::from,
         );
