@@ -18,3 +18,11 @@ ratatui-core = "0.1.2"
 ratatui-crossterm = "0.1.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+zstd = { version = "0.14.0", optional = true }
+
+[build-dependencies]
+zstd = { version = "0.14.0", optional = true, features = ["zstdmt"] }
+
+[features]
+# Embed the saved Lisp image so the binary runs on its own; see src/bundle.rs.
+bundle = ["dep:zstd"]
