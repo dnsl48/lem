@@ -46,6 +46,7 @@ See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md).
 ## Layout
 
 ```
+Makefile                     build, run, test, dist (see Building)
 lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' implementation class
@@ -63,27 +64,46 @@ docs/
 ## Building
 
 ```bash
-cd rust && cargo test                    # Rust half (53 tests)
+make -C frontends/ratatui          # both halves + the ./lem-ratatui launcher
+make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
+make -C frontends/ratatui test     # Rust half (53 tests)
+make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
+```
 
-# Lisp half: build, then drive it by hand
+`make dist` embeds the Lisp image, zstd-compressed, in the Rust binary
+(`bundle` feature, ~27 MB against the image's ~125 MB). It can't be run
+from memory — an SBCL executable locates its core via `/proc/self/exe`,
+which a memfd can't satisfy — so the first launch unpacks it to
+`$XDG_CACHE_HOME/lem-ratatui/<hash>/` (default `~/.cache`) and later
+launches reuse it; images from other builds are removed at that point.
+A path given as the first argument still overrides the embedded image.
+See [`docs/adr/0007`](docs/adr/0007-one-binary-by-embedding-the-image.md).
+
+`frontends/ratatui/lem-ratatui` finds both halves relative to itself, so
+it can be symlinked onto `PATH`. The Lisp image is rebuilt only when a
+Lisp source under `src/`, `extensions/`, `frontends/server/` or this
+frontend changes; `make -B` forces it.
+
+By hand, from the repo root:
+
+```bash
 qlot install
 sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
+(cd frontends/ratatui/rust && cargo build --release)
+frontends/ratatui/rust/target/release/lem-ratatui frontends/ratatui/lem-ratatui-lisp
 ```
 
 Point `LEM_HOME` at a scratch directory when driving it by hand — note
-the **trailing slash**, which `merge-pathnames` requires:
-
-```bash
-LEM_HOME=/tmp/lem-scratch/ ./frontends/ratatui/lem-ratatui-lisp
-```
+the **trailing slash**, which `merge-pathnames` requires. Files can't be
+passed on the command line yet; open them with `C-x C-f`.
 
 Set `LEM_RATATUI_DEBUG=1` for transport logging on stderr, and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
-seconds when the editor appears stuck.
+seconds when the editor appears stuck. The Lisp child's stderr goes to
+`/tmp/lem-ratatui.log`.
 
-There is deliberately no `make ratatui` target and no `lem.asd`
-registration yet — neither is useful until the display half does
-something.
+There is deliberately no `make ratatui` target in the root `Makefile`
+and no `lem.asd` registration yet.
 
 ## What it does
 
