@@ -16,7 +16,7 @@ import os, pty, select, time, re, fcntl, termios, struct, signal, subprocess, sy
 
 REPO = "/var/mnt/workbench/toys/lem/ratatui"
 BIN = f"{REPO}/frontends/ratatui/rust/target/release/lem-ratatui"
-LISP = f"{REPO}/frontends/ratatui/lem-ratatui-lisp"
+LISP = f"{REPO}/frontends/ratatui/dist/lem-ratatui-lisp"
 ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/", TERM="xterm-256color")
 
 class Session:

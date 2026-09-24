@@ -104,7 +104,7 @@ fn main() -> Result<()> {
         #[cfg(feature = "bundle")]
         None => bundle::image()?,
         #[cfg(not(feature = "bundle"))]
-        None => PathBuf::from("../lem-ratatui-lisp"),
+        None => PathBuf::from("../dist/lem-ratatui-lisp"),
     };
     let log = PathBuf::from("/tmp/lem-ratatui.log");
 

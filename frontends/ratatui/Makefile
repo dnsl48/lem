@@ -1,6 +1,6 @@
 # Build and run Lem with the Ratatui frontend.
 #
-#   make          build both halves and the ./lem-ratatui launcher
+#   make          build both halves and the dist/lem-ratatui-dev launcher
 #   make run      launch it against a scratch LEM_HOME
 #   make dist     one self-contained binary, dist/lem-ratatui
 #   make test     Rust unit tests
@@ -16,9 +16,10 @@ LISP ?= sbcl --dynamic-space-size 4GiB --noinform --no-sysinit --no-userinit --n
 CARGO ?= cargo
 LEM_HOME ?= /tmp/lem-scratch/
 
-LISP_BIN := $(HERE)/lem-ratatui-lisp
+# Every build output lands in dist/.
+LISP_BIN := $(HERE)/dist/lem-ratatui-lisp
 RUST_BIN := $(HERE)/rust/target/release/lem-ratatui
-LAUNCHER := $(HERE)/lem-ratatui
+LAUNCHER := $(HERE)/dist/lem-ratatui-dev
 DIST_BIN := $(HERE)/dist/lem-ratatui
 QLOT_SETUP := $(ROOT)/.qlot/setup.lisp
 
@@ -51,7 +52,7 @@ $(RUST_BIN): FORCE
 $(LAUNCHER): $(LISP_BIN) $(RUST_BIN)
 	printf '%s\n' '#!/bin/sh' \
 		'here=$$(dirname "$$(readlink -f "$$0")")' \
-		'exec "$$here/rust/target/release/lem-ratatui" "$$here/lem-ratatui-lisp"' > $@
+		'exec "$$here/../rust/target/release/lem-ratatui" "$$here/lem-ratatui-lisp"' > $@
 	chmod +x $@
 
 # The Lisp image is embedded (zstd) and unpacked to ~/.cache/lem-ratatui/
@@ -60,7 +61,6 @@ dist: $(DIST_BIN)
 
 $(DIST_BIN): $(LISP_BIN) FORCE
 	cd $(HERE)/rust && LEM_RATATUI_LISP=$(LISP_BIN) $(CARGO) build --profile dist --features bundle
-	mkdir -p $(dir $@)
 	cp $(HERE)/rust/target/dist/lem-ratatui $@
 
 run: all
@@ -71,7 +71,7 @@ test:
 	cd $(HERE)/rust && $(CARGO) test
 
 clean:
-	rm -rf $(LISP_BIN) $(LAUNCHER) $(dir $(DIST_BIN))
+	rm -rf $(HERE)/dist
 	cd $(HERE)/rust && $(CARGO) clean
 
 FORCE:
