@@ -47,6 +47,8 @@ See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md).
 
 ```
 Makefile                     build, run, test, dist (see Building)
+dist/                        every build output (gitignored): the Lisp
+                             image, the dev launcher, the bundled binary
 lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' implementation class
@@ -64,7 +66,7 @@ docs/
 ## Building
 
 ```bash
-make -C frontends/ratatui          # both halves + the ./lem-ratatui launcher
+make -C frontends/ratatui          # both halves + the dist/lem-ratatui-dev launcher
 make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
 make -C frontends/ratatui test     # Rust half (53 tests)
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
@@ -79,8 +81,9 @@ launches reuse it; images from other builds are removed at that point.
 A path given as the first argument still overrides the embedded image.
 See [`docs/adr/0007`](docs/adr/0007-one-binary-by-embedding-the-image.md).
 
-`frontends/ratatui/lem-ratatui` finds both halves relative to itself, so
-it can be symlinked onto `PATH`. The Lisp image is rebuilt only when a
+Every build output lands in `frontends/ratatui/dist/`. The launcher,
+`dist/lem-ratatui-dev`, finds both halves relative to itself, so it can
+be symlinked onto `PATH`. The Lisp image is rebuilt only when a
 Lisp source under `src/`, `extensions/`, `frontends/server/` or this
 frontend changes; `make -B` forces it.
 
@@ -90,7 +93,7 @@ By hand, from the repo root:
 qlot install
 sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
 (cd frontends/ratatui/rust && cargo build --release)
-frontends/ratatui/rust/target/release/lem-ratatui frontends/ratatui/lem-ratatui-lisp
+frontends/ratatui/rust/target/release/lem-ratatui frontends/ratatui/dist/lem-ratatui-lisp
 ```
 
 Point `LEM_HOME` at a scratch directory when driving it by hand — note
