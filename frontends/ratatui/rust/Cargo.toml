@@ -10,3 +10,11 @@ repository = "https://github.com/lem-project/lem"
 
 [workspace.lints.clippy]
 all = "warn"
+
+# The self-contained binary (`make dist`). Its own profile so it builds into
+# target/dist/ and doesn't clobber the release binary the launcher runs.
+[profile.dist]
+inherits = "release"
+lto = true
+codegen-units = 1
+strip = true

@@ -22,6 +22,7 @@ Supporting research lives in [`../protocol-notes.md`](../protocol-notes.md).
 | [0004](0004-two-processes-not-embedded-lisp.md) | Two OS processes, not an embedded Lisp runtime | Accepted |
 | [0005](0005-stdio-as-the-default-transport.md) | stdio as the default transport | Accepted |
 | [0006](0006-stay-on-lem-server-for-now.md) | Stay on `lem-server` for now (revisits 0001) | Accepted |
+| [0007](0007-one-binary-by-embedding-the-image.md) | One binary by embedding the Lisp image, not the Lisp runtime | Accepted |
 
 ## Adding one
 

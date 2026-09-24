@@ -6,6 +6,8 @@
 //!
 //! Status: rendering, keyboard input, reflow on resize and clipboard.
 
+#[cfg(feature = "bundle")]
+mod bundle;
 mod child;
 mod clipboard;
 mod input;
@@ -97,10 +99,13 @@ fn apply_frame(registry: &mut Registry, bulk: Bulk) -> bool {
 }
 
 fn main() -> Result<()> {
-    let program = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("../lem-ratatui-lisp"));
+    let program = match std::env::args().nth(1) {
+        Some(path) => PathBuf::from(path),
+        #[cfg(feature = "bundle")]
+        None => bundle::image()?,
+        #[cfg(not(feature = "bundle"))]
+        None => PathBuf::from("../lem-ratatui-lisp"),
+    };
     let log = PathBuf::from("/tmp/lem-ratatui.log");
 
     // Bound for the whole run: dropping it restores the terminal, so it
