@@ -1,6 +1,6 @@
 # 0003. Keep the JSON codec until measurement says otherwise
 
-**Status:** Accepted — September 2026
+**Status:** Superseded by [0010](0010-protobuf-for-schema-and-codec.md) — September 2026
 
 ## Context
 
