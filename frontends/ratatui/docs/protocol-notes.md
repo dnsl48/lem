@@ -257,7 +257,7 @@ exists, and the editor will sit in `prompt-for-y-or-n-p` forever.
 ## 13. Defects in jsonrpc's stdio server transport
 
 Server-side stdio is not exercised by anything else in this ecosystem,
-and it carries three independent defects. All are worked around in
+and it carries four independent defects. All are worked around in
 `../lisp/jsonrpc-stdio-fixes.lisp`; each is worth reporting upstream.
 
 1. **Notifications never leave the process.** `jsonrpc/server:broadcast`
@@ -275,6 +275,14 @@ and it carries three independent defects. All are worked around in
    interned-but-undefined against the pinned version, so both of its
    methods signal `undefined-function` on first use. Verified by loading
    `lem-server` and checking `fboundp` on each.
+4. **Quitting always crashes.** `start-server`'s cleanup calls
+   `destroy-thread` on its processing thread without checking that it is
+   still alive. `uiop:quit` makes SBCL terminate every other thread
+   before unwinding the main one, so the thread is always gone by then,
+   `destroy-thread` signals, and under `--disable-debugger` every
+   `C-x C-c` exits 1 with a backtrace in the log. The screen is restored
+   correctly either way, which is why nobody noticed until the launcher
+   started reading Lem's exit status.
 
 ## 14. One `bulk` is exactly one frame
 

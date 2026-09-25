@@ -1,6 +1,6 @@
 # Build and run Lem with the Ratatui frontend.
 #
-#   make          build both halves and the dist/lem-ratatui-dev launcher
+#   make          build everything and the dist/lem-ratatui-dev script
 #   make run      launch it against a scratch LEM_HOME
 #   make dist     one self-contained binary, dist/lem-ratatui
 #   make test     Rust unit tests
@@ -18,7 +18,8 @@ LEM_HOME ?= /tmp/lem-scratch/
 
 # Every build output lands in dist/.
 LISP_BIN := $(HERE)/dist/lem-ratatui-lisp
-RUST_BIN := $(HERE)/rust/target/release/lem-ratatui
+# The launcher finds the display binary beside itself in target/release.
+RUST_BIN := $(HERE)/rust/target/release/lem-ratatui-launcher
 LAUNCHER := $(HERE)/dist/lem-ratatui-dev
 DIST_BIN := $(HERE)/dist/lem-ratatui
 QLOT_SETUP := $(ROOT)/.qlot/setup.lisp
@@ -52,16 +53,20 @@ $(RUST_BIN): FORCE
 $(LAUNCHER): $(LISP_BIN) $(RUST_BIN)
 	printf '%s\n' '#!/bin/sh' \
 		'here=$$(dirname "$$(readlink -f "$$0")")' \
-		'exec "$$here/../rust/target/release/lem-ratatui" "$$here/lem-ratatui-lisp"' > $@
+		'LEM_RATATUI_LISP="$$here/lem-ratatui-lisp" exec "$$here/../rust/target/release/lem-ratatui-launcher" "$$@"' > $@
 	chmod +x $@
 
-# The Lisp image is embedded (zstd) and unpacked to ~/.cache/lem-ratatui/
-# on first launch; see rust/crates/lem-ratatui/src/bundle.rs.
+# The launcher, with the Lisp image and the display binary embedded (zstd)
+# and unpacked to ~/.cache/lem-ratatui/ on first launch; see
+# rust/crates/lem-ratatui-launcher/src/bundle.rs. The display binary is
+# built first because the launcher's build script reads it.
 dist: $(DIST_BIN)
 
 $(DIST_BIN): $(LISP_BIN) FORCE
-	cd $(HERE)/rust && LEM_RATATUI_LISP=$(LISP_BIN) $(CARGO) build --profile dist --features bundle
-	cp $(HERE)/rust/target/dist/lem-ratatui $@
+	cd $(HERE)/rust && $(CARGO) build --profile dist -p lem-ratatui
+	cd $(HERE)/rust && LEM_RATATUI_LISP=$(LISP_BIN) LEM_RATATUI_TERMINAL=$(HERE)/rust/target/dist/lem-ratatui \
+		$(CARGO) build --profile dist -p lem-ratatui-launcher --features bundle
+	cp $(HERE)/rust/target/dist/lem-ratatui-launcher $@
 
 run: all
 	mkdir -p $(LEM_HOME)
