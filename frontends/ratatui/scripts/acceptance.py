@@ -2,8 +2,7 @@
 
 Run from anywhere once both halves are built:
 
-    sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
-    cd frontends/ratatui/rust && cargo build --release
+    make -C frontends/ratatui
     python3 frontends/ratatui/scripts/acceptance.py
 
 Assert on effects — disk contents, exit statuses, termios flags — never on
@@ -14,16 +13,16 @@ that reason.
 """
 import os, pty, select, time, re, fcntl, termios, struct, signal, subprocess, sys
 
-REPO = "/var/mnt/workbench/toys/lem/ratatui"
-BIN = f"{REPO}/frontends/ratatui/rust/target/release/lem-ratatui"
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+BIN = f"{REPO}/frontends/ratatui/rust/target/release/lem-ratatui-launcher"
 LISP = f"{REPO}/frontends/ratatui/dist/lem-ratatui-lisp"
-ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/", TERM="xterm-256color")
+ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/", TERM="xterm-256color", LEM_RATATUI_LISP=LISP)
 
 class Session:
     def __init__(self, cols=100, rows=30):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            os.execve(BIN, [BIN, LISP], ENV)
+            os.execve(BIN, [BIN], ENV)
         self.winsize(cols, rows)
         self.out = b""
     def winsize(self, c, r):
@@ -43,8 +42,9 @@ class Session:
         for it in items:
             os.write(self.fd, it if isinstance(it, bytes) else it.encode())
             time.sleep(delay)
-    def child_pid(self):
-        r = subprocess.run(["pgrep", "-P", str(self.pid)], capture_output=True, text=True)
+    def lem_pid(self):
+        r = subprocess.run(["pgrep", "-P", str(self.pid), "-f", "lem-ratatui-lisp"],
+                           capture_output=True, text=True)
         pids = [int(p) for p in r.stdout.split()]
         return pids[0] if pids else None
     def mark(self): return len(self.out)
@@ -151,14 +151,19 @@ check(7, "C-x C-c exits cleanly and restores the terminal",
 s.kill()
 
 # --- 8: killing Lem restores the terminal --------------------------------
+# The display sees EOF and hands the terminal back; the launcher, seeing
+# Lem die of a signal, reports it and exits 1.
 s = Session(); s.pump(8)
-child = s.child_pid()
+child = s.lem_pid()
 if child:
     os.kill(child, signal.SIGKILL)
 status = s.wait(12)
 restored = s.modes_restored()
-check(8, "killing Lem leaves the terminal clean", status == 0 and restored,
-      f"child={child}, status={status}, modes restored={restored}")
+exited_1 = isinstance(status, int) and os.WIFEXITED(status) and os.WEXITSTATUS(status) == 1
+reported = "Lem exited with signal" in s.plain()
+check(8, "killing Lem leaves the terminal clean and is reported",
+      exited_1 and restored and reported,
+      f"child={child}, status={status}, modes restored={restored}, reported={reported}")
 s.kill()
 
 # --- 9: multi-column list renders instead of crashing ------------------
