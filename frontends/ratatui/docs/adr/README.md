@@ -19,10 +19,11 @@ Supporting research lives in [`../protocol-notes.md`](../protocol-notes.md).
 | [0001](0001-reuse-lem-server-jsonrpc.md) | Reuse the `lem-server` JSON-RPC protocol | Accepted |
 | [0002](0002-ratatui-core-over-full-ratatui.md) | Depend on `ratatui-core`, not full Ratatui | Accepted |
 | [0003](0003-keep-json-codec-for-now.md) | Keep the JSON codec until measurement says otherwise | Accepted |
-| [0004](0004-two-processes-not-embedded-lisp.md) | Two OS processes, not an embedded Lisp runtime | Accepted |
+| [0004](0004-two-processes-not-embedded-lisp.md) | Two OS processes, not an embedded Lisp runtime | Accepted; who spawns whom superseded by 0008 |
 | [0005](0005-stdio-as-the-default-transport.md) | stdio as the default transport | Accepted |
 | [0006](0006-stay-on-lem-server-for-now.md) | Stay on `lem-server` for now (revisits 0001) | Accepted |
-| [0007](0007-one-binary-by-embedding-the-image.md) | One binary by embedding the Lisp image, not the Lisp runtime | Accepted |
+| [0007](0007-one-binary-by-embedding-the-image.md) | One binary by embedding the Lisp image, not the Lisp runtime | Superseded by 0008 |
+| [0008](0008-a-launcher-owns-the-processes.md) | A launcher owns the processes; the display only speaks the protocol | Accepted |
 
 ## Adding one
 

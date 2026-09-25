@@ -1,34 +1,47 @@
-//! The Lisp image embedded in this binary (`bundle` feature).
+//! The Lisp image and display binary embedded in this one (`bundle`
+//! feature).
 //!
-//! It can't be run straight from memory: an SBCL executable finds its core
-//! by opening `/proc/self/exe`, which a memfd has no usable path for
-//! ("Can't find sbcl.core"). So it is unpacked once to the user's cache,
-//! keyed by the image's hash, and spawned from there like the unbundled one.
+//! Neither can be run straight from memory: an SBCL executable finds its
+//! core by opening `/proc/self/exe`, which a memfd has no usable path for
+//! ("Can't find sbcl.core"). So each is unpacked once to the user's cache,
+//! keyed by a hash of both, and spawned from there like an unbundled one.
 
+use std::env::consts::EXE_SUFFIX;
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-static IMAGE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-ratatui-lisp.zst"));
+static LISP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-ratatui-lisp.zst"));
+static TERMINAL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-ratatui.zst"));
 const HASH: &str = env!("LEM_RATATUI_BUNDLE_HASH");
 
-/// Path of the unpacked image, unpacking it first if this build's copy
-/// isn't in the cache yet.
-pub fn image() -> Result<PathBuf> {
+/// Path of the unpacked Lisp image.
+pub fn lisp() -> Result<PathBuf> {
+    install(&format!("lem-ratatui-lisp{EXE_SUFFIX}"), LISP)
+}
+
+/// Path of the unpacked display binary.
+pub fn terminal() -> Result<PathBuf> {
+    install(&format!("lem-ratatui{EXE_SUFFIX}"), TERMINAL)
+}
+
+/// Path of `name` in the cache, unpacking `packed` there first if this
+/// build's copy isn't in it yet.
+fn install(name: &str, packed: &[u8]) -> Result<PathBuf> {
     let root = cache_root()?.join("lem-ratatui");
     let dir = root.join(HASH);
-    let path = dir.join("lem-ratatui-lisp");
+    let path = dir.join(name);
     if path.is_file() {
         return Ok(path);
     }
 
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     // Unpacked beside the target and renamed into place, so a concurrent
-    // launch or an interrupted one never sees a partial image.
-    let partial = dir.join(format!(".lem-ratatui-lisp.{}", std::process::id()));
-    unpack(&partial).with_context(|| format!("unpacking Lisp image to {}", partial.display()))?;
+    // launch or an interrupted one never sees a partial file.
+    let partial = dir.join(format!(".{name}.{}", std::process::id()));
+    unpack(packed, &partial).with_context(|| format!("unpacking {}", partial.display()))?;
     fs::rename(&partial, &path).with_context(|| format!("installing {}", path.display()))?;
 
     prune(&root);
@@ -43,11 +56,11 @@ fn cache_root() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".cache"))
 }
 
-fn unpack(to: &Path) -> Result<()> {
+fn unpack(packed: &[u8], to: &Path) -> Result<()> {
     // Closed before returning: spawning a file this process still holds
     // open for writing fails with ETXTBSY.
     let mut out = BufWriter::new(File::create(to)?);
-    zstd::stream::copy_decode(IMAGE, &mut out)?;
+    zstd::stream::copy_decode(packed, &mut out)?;
     out.into_inner()
         .map_err(io::IntoInnerError::into_error)?
         .sync_all()?;
@@ -59,8 +72,8 @@ fn unpack(to: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Drop images left by other builds. Best effort: a still-running Lem keeps
-/// its deleted image alive, and a failure here costs only disk space.
+/// Drop what other builds left. Best effort: a still-running Lem keeps its
+/// deleted image alive, and a failure here costs only disk space.
 fn prune(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;

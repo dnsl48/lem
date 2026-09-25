@@ -5,7 +5,7 @@ display protocol that already drives the browser and webview frontends.
 
 > **Status: working PoC.** Opens files, edits them, renders syntax
 > colours, reflows on resize and leaves the terminal clean on exit — all
-> eight acceptance checks in [`docs/poc-plan.md`](docs/poc-plan.md) pass.
+> the acceptance checks from [`docs/poc-plan.md`](docs/poc-plan.md) pass.
 > Single window only: no popups, mouse, clipboard or images. See
 > **Known gaps** below for what is deliberately absent.
 
@@ -16,21 +16,31 @@ Two halves, split by toolchain rather than by role:
 ```
 lisp/     implements lem-if:* by inheriting lem-server:jsonrpc,
           overriding only the capability flags a terminal changes
-rust/     owns the terminal: paints protocol frames into a cell buffer,
-          sends key and mouse events back
+rust/     the launcher, which starts both halves and connects them, and
+          the display, which owns the terminal: paints protocol frames
+          into a cell buffer, sends key and mouse events back
 docs/     the investigation, and the decisions it produced
 ```
 
-Lem runs as a **child** of the Rust process. That direction is forced:
-with `--mode=stdio` Lem's stdout carries protocol traffic, so it must not
-be a TTY.
+Lem and the display run as **siblings** under a launcher, which joins
+their stdio with a pipe each way. Lem's stdout carries protocol traffic,
+so it must not be a TTY; the display's does too, so it draws on
+`/dev/tty` instead. Neither knows how the other was started.
 
 ```
-┌─────────────────┐  spawns   ┌──────────────────────────┐
-│  lem-ratatui    │ ────────► │ lem --interface RATATUI  │
-│  (owns the TTY) │ ◄──────── │ (stdio JSON-RPC)         │
-└─────────────────┘  frames   └──────────────────────────┘
+                  ┌──────────────────────┐
+                  │ lem-ratatui-launcher │  finds, unpacks, starts,
+                  └──────────────────────┘  logs, reports exits
+                    spawns │       │ spawns
+               ┌───────────┘       └───────────┐
+               ▼                               ▼
+┌──────────────────────────┐  frames  ┌─────────────────┐
+│ lem --interface RATATUI  │ ───────► │  lem-ratatui    │
+│ (stdio JSON-RPC)         │ ◄─────── │  (owns the TTY) │
+└──────────────────────────┘  input   └─────────────────┘
 ```
+
+See [`docs/adr/0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 
 ## Why not "a Ratatui frontend"
 
@@ -57,7 +67,9 @@ rust/
   Cargo.toml                 workspace
   crates/
     lem-protocol/            wire types + codec; no TTY, unit-testable
-    lem-ratatui/             the binary: transport, compositing, input
+    lem-ratatui/             the display: transport, compositing, input
+    lem-ratatui-launcher/    the OS-facing binary: starts and connects
+                             both halves; embeds them for `make dist`
 docs/
   protocol-notes.md          what lem-server actually sends, with refs
   adr/                       decisions and the arguments behind them
@@ -66,24 +78,28 @@ docs/
 ## Building
 
 ```bash
-make -C frontends/ratatui          # both halves + the dist/lem-ratatui-dev launcher
+make -C frontends/ratatui          # everything + the dist/lem-ratatui-dev script
 make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
 make -C frontends/ratatui test     # Rust half (53 tests)
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
 ```
 
-`make dist` embeds the Lisp image, zstd-compressed, in the Rust binary
-(`bundle` feature, ~27 MB against the image's ~125 MB). It can't be run
-from memory — an SBCL executable locates its core via `/proc/self/exe`,
-which a memfd can't satisfy — so the first launch unpacks it to
-`$XDG_CACHE_HOME/lem-ratatui/<hash>/` (default `~/.cache`) and later
-launches reuse it; images from other builds are removed at that point.
-A path given as the first argument still overrides the embedded image.
-See [`docs/adr/0007`](docs/adr/0007-one-binary-by-embedding-the-image.md).
+`make dist` embeds the Lisp image and the display binary, zstd-compressed,
+in the launcher (`bundle` feature, ~27 MB against the image's ~125 MB).
+They can't be run from memory — an SBCL executable locates its core via
+`/proc/self/exe`, which a memfd can't satisfy — so the first launch
+unpacks them to `$XDG_CACHE_HOME/lem-ratatui/<hash>/` (default
+`~/.cache`) and later launches reuse them; copies from other builds are
+removed at that point. `LEM_RATATUI_LISP` and `LEM_RATATUI_TERMINAL`
+still override either one. See
+[`docs/adr/0007`](docs/adr/0007-one-binary-by-embedding-the-image.md) and
+[`0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 
-Every build output lands in `frontends/ratatui/dist/`. The launcher,
-`dist/lem-ratatui-dev`, finds both halves relative to itself, so it can
-be symlinked onto `PATH`. The Lisp image is rebuilt only when a
+Every build output lands in `frontends/ratatui/dist/`, except the Rust
+binaries of a development build, which stay in `rust/target/release/`.
+The script `dist/lem-ratatui-dev` runs the launcher from there against the
+image beside it, so it can be symlinked onto `PATH`; the launcher finds
+the display beside itself. The Lisp image is rebuilt only when a
 Lisp source under `src/`, `extensions/`, `frontends/server/` or this
 frontend changes; `make -B` forces it.
 
@@ -93,17 +109,21 @@ By hand, from the repo root:
 qlot install
 sbcl --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
 (cd frontends/ratatui/rust && cargo build --release)
-frontends/ratatui/rust/target/release/lem-ratatui frontends/ratatui/dist/lem-ratatui-lisp
+LEM_RATATUI_LISP=frontends/ratatui/dist/lem-ratatui-lisp frontends/ratatui/rust/target/release/lem-ratatui-launcher
 ```
 
 Point `LEM_HOME` at a scratch directory when driving it by hand — note
-the **trailing slash**, which `merge-pathnames` requires. Files can't be
-passed on the command line yet; open them with `C-x C-f`.
+the **trailing slash**, which `merge-pathnames` requires. Every
+argument is passed through to Lem, so `lem-ratatui README.md` opens the
+file just as `lem README.md` would. `LEM_RATATUI_LISP` picks the Lisp
+image and `LEM_RATATUI_TERMINAL` the display binary; `make dist`'s binary
+falls back to the ones embedded in it.
 
 Set `LEM_RATATUI_DEBUG=1` for transport logging on stderr, and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
-seconds when the editor appears stuck. The Lisp child's stderr goes to
-`/tmp/lem-ratatui.log`.
+seconds when the editor appears stuck. Lem's stderr goes to
+`/tmp/lem-ratatui.log`; if Lem dies or exits non-zero the launcher says
+so, names that log, and exits non-zero.
 
 There is deliberately no `make ratatui` target in the root `Makefile`
 and no `lem.asd` registration yet.
@@ -121,7 +141,7 @@ Verified against a real editor under a pty:
 | Typing and undo | text inserts; `C-x u` reverts it |
 | Resize | 60→100 columns paints to 100, 100→60 paints to 60 |
 | `C-x C-c` | exits 0, raw mode and the alternate screen released |
-| Killing Lem | the display half exits 0 and still restores the terminal |
+| Killing Lem | the terminal is restored, and the launcher reports it and exits 1 |
 | Splits | `C-x 3` and `C-x 2` render with `│` separators, nested |
 | UTF-8 input | `café naïve 日本語 🔥 żółć` round-trips byte-exact |
 | Floating windows | ringed by a rounded box, `drop-curtain` joining a prompt above |
@@ -206,7 +226,7 @@ implementation class — no change to `lem-server`, no patching:
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # the 8-point script, needs both halves built
+python3 scripts/acceptance.py      # needs `make` to have run
 ```
 
 ## Next steps
@@ -294,15 +314,15 @@ flag. The flag has exactly one call site in Lem, and it is the crash.
 - `:underline-color-support t` is set deliberately but is unverified
   end-to-end; it needs real terminal-capability detection.
 - `*standard-output*` is not yet muffled, and stdout is the wire under
-  `--mode=stdio`. A stray `format` corrupts the frame stream; the Rust
-  side must also redirect the child's stderr to a log file. See
+  `--mode=stdio`. A stray `format` corrupts the frame stream; the
+  launcher must also redirect Lem's stderr to a log file. See
   [`docs/adr/0005`](docs/adr/0005-stdio-as-the-default-transport.md).
 - No protocol version exchange at `login`. Two separately installed
   binaries can drift; needed before this ships to users, not for the PoC.
-- `lisp/jsonrpc-stdio-fixes.lisp` works around three defects in jsonrpc's
+- `lisp/jsonrpc-stdio-fixes.lisp` works around four defects in jsonrpc's
   stdio server transport, one of which (`lem-server`'s own
   `jsonrpc-stdio-patch.lisp` referencing three undefined functions) is a
-  live bug in the tree. All three deserve upstream reports; see
+  live bug in the tree. All four deserve upstream reports; see
   [`docs/protocol-notes.md`](docs/protocol-notes.md) section 13.
 - The display half must send non-nil `foreground`/`background` in `login`,
   or the editor silently stops emitting. That is a robustness bug in

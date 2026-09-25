@@ -4,7 +4,7 @@
 ;;;;
 ;;;; Server-side stdio is not exercised anywhere else in the ecosystem —
 ;;;; lem-server's other frontends all use websocket — and it carries
-;;;; three independent defects. All are fixed here rather than upstream so
+;;;; four independent defects. All are fixed here rather than upstream so
 ;;;; the PoC stays contained; each is worth reporting separately.
 ;;;;
 ;;;; 1. Notifications never leave the process. `jsonrpc/server:broadcast'
@@ -28,6 +28,14 @@
 ;;;;    against the pinned version, so both of its methods signal
 ;;;;    undefined-function on first use.
 ;;;;
+;;;; 4. Quitting always crashes. `start-server' destroys its processing
+;;;;    thread when the reading loop unwinds, without checking that the
+;;;;    thread is still alive. On `uiop:quit' SBCL terminates every other
+;;;;    thread *before* unwinding the main one, so by the time that
+;;;;    cleanup runs the thread is always gone, `destroy-thread' signals,
+;;;;    and under --disable-debugger that turns every `C-x C-c' into exit
+;;;;    status 1 with a backtrace in the log.
+;;;;
 ;;;; These methods replace lem-server's. Ours win because lem-ratatui
 ;;;; depends on lem-server and therefore loads after it.
 
@@ -35,7 +43,8 @@
   "Serve on stdio, registering the connection so notifications can reach it.
 
 Identical to the library's method apart from the `on-open-connection'
-call; see defect 1 above."
+call and the cleanup tolerating a thread that has already exited; see
+defects 1 and 4 above."
   (let* ((stream (make-two-way-stream (stdio-transport-input transport)
                                       (stdio-transport-output transport)))
          (connection (make-instance 'connection
@@ -52,7 +61,10 @@ call; see defect 1 above."
                (run-processing-loop transport connection))
              :name "jsonrpc/transport/stdio processing")))
       (unwind-protect (run-reading-loop transport connection)
-        (bt2:destroy-thread thread)))))
+        ;; Not a `thread-alive-p' check: the thread can still exit
+        ;; between that and the destroy.
+        (handler-case (bt2:destroy-thread thread)
+          (bt2:bordeaux-threads-error () nil))))))
 
 (defmethod send-message-using-transport ((transport stdio-transport) connection message)
   "Write MESSAGE with a byte-counted Content-Length header."
