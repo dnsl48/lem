@@ -1,6 +1,6 @@
 # 0006. Stay on `lem-server` for now
 
-**Status:** Accepted — September 2026
+**Status:** Superseded by [0009](0009-our-own-relay.md) — September 2026
 **Revisits:** [0001](0001-reuse-lem-server-jsonrpc.md)
 
 ## Context
