@@ -1,6 +1,8 @@
 # 0007. One binary by embedding the Lisp image, not the Lisp runtime
 
-**Status:** Accepted — September 2026
+**Status:** Superseded by [0008](0008-a-launcher-owns-the-processes.md) —
+the image is still embedded, but in the launcher, beside the display
+binary.
 
 ## Context
 

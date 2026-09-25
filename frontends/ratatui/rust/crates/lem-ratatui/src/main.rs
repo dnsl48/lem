@@ -1,23 +1,20 @@
 //! Terminal display half for Lem.
 //!
-//! This process owns the terminal. It spawns Lem as a child speaking the
-//! `lem-server` JSON-RPC protocol over stdio, paints the frames it is
-//! sent into per-view cell buffers, composites them, and draws.
+//! This process owns the terminal. It speaks the `lem-server` JSON-RPC
+//! protocol over its own stdio, paints the frames it is sent into per-view
+//! cell buffers, composites them, and draws. Starting Lem and connecting
+//! the two is `lem-ratatui-launcher`'s job, not this one's.
 //!
 //! Status: rendering, keyboard input, reflow on resize and clipboard.
 
-#[cfg(feature = "bundle")]
-mod bundle;
-mod child;
 mod clipboard;
 mod input;
 mod metrics;
 mod paint;
 mod term;
+mod transport;
 mod views;
 
-use std::io;
-use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -99,21 +96,12 @@ fn apply_frame(registry: &mut Registry, bulk: Bulk) -> bool {
 }
 
 fn main() -> Result<()> {
-    let program = match std::env::args().nth(1) {
-        Some(path) => PathBuf::from(path),
-        #[cfg(feature = "bundle")]
-        None => bundle::image()?,
-        #[cfg(not(feature = "bundle"))]
-        None => PathBuf::from("../dist/lem-ratatui-lisp"),
-    };
-    let log = PathBuf::from("/tmp/lem-ratatui.log");
-
     // Bound for the whole run: dropping it restores the terminal, so it
     // must outlive the draw loop. Matched by reference — consuming it here
     // would restore the terminal before the first frame is painted.
     let guard = term::Guard::new_if_interactive()?;
     let mut terminal = match &guard {
-        Some(_) => Some(Terminal::new(CrosstermBackend::new(io::stdout()))?),
+        Some(guard) => Some(Terminal::new(CrosstermBackend::new(guard.writer()?))?),
         None => None,
     };
 
@@ -121,8 +109,7 @@ fn main() -> Result<()> {
     // frame is laid out for the wrong screen.
     let mut size = display_size(guard.is_some());
 
-    // `_lem` is held only for its Drop, which kills and reaps the child.
-    let (_lem, mut reader, mut writer) = child::Lem::spawn(&program, &log)?;
+    let (mut reader, mut writer) = transport::stdio();
     let mut clipboard = clipboard::Clipboard::new();
     let mut registry = Registry::default();
 
@@ -136,7 +123,7 @@ fn main() -> Result<()> {
             }
         }
         // Dropping tx closes the channel, which is how the main loop
-        // learns that Lem exited.
+        // learns that Lem hung up.
     });
 
     writer.send(&rpc::request(
@@ -195,7 +182,7 @@ fn main() -> Result<()> {
                     return Ok(());
                 }
             };
-            let child::Received {
+            let transport::Received {
                 incoming,
                 bytes,
                 decode,

@@ -1,6 +1,8 @@
 # 0004. Two OS processes, not an embedded Lisp runtime
 
-**Status:** Accepted — September 2026
+**Status:** Accepted — September 2026. The parent/child arrangement is
+superseded by [0008](0008-a-launcher-owns-the-processes.md); the two
+processes are not.
 
 ## Context
 
