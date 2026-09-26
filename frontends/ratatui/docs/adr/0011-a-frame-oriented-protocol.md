@@ -5,6 +5,8 @@ concrete `relay.proto` is written in [phase 2](../relay-plan.md) and
 reviewed against this record.
 **Refined by:** [0012](0012-the-relay-frame-model.md), the frame model:
 it settles character width and moves interning into the phase 2 codec.
+**Answered by:** [0013](0013-icons-and-mouse-input.md), icon glyphs and
+the mouse event shape.
 
 ## Context
 

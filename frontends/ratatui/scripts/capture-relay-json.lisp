@@ -33,8 +33,10 @@
         (lines '()))
     (setf (lem-relay/relay:relay-sink relay)
           (lambda (message)
-            (dolist (body (lem-relay/json/codec:encode message state))
-              (push (babel:octets-to-string body :encoding :utf-8) lines))))
+            (let ((seq (lem-relay/json/codec:next-seq state)))
+              (dolist (body (lem-relay/json/codec:encode message state seq))
+                (push (babel:octets-to-string body :encoding :utf-8) lines))
+              seq)))
     (lem:with-current-buffers ()
       (lem:with-implementation relay
         (lem:setup-first-frame)

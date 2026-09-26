@@ -7,12 +7,17 @@
   (:export :serve))
 (in-package :lem-relay/json/serve)
 
-(defun write-bodies (output lock bodies)
+(defun send-numbered (output lock state encode)
+  "Number the next outgoing message and write the bodies ENCODE makes of
+it, given that number; return the number. Both happen under LOCK, so
+numbers follow wire order whichever thread sends (ADR 0013)."
   (bt2:with-lock-held (lock)
-    (dolist (body bodies)
-      (framing:write-message output body))))
+    (let ((seq (codec:next-seq state)))
+      (dolist (body (funcall encode seq))
+        (framing:write-message output body))
+      seq)))
 
-(defun login (relay output lock ready id width height foreground background)
+(defun login (relay output lock state ready id width height foreground background)
   "Answer the display's `login': take its size and colours, answer it, and
 let the editor thread start (it waits for this; see `serve')."
   (when (and width height)
@@ -23,8 +28,10 @@ let the editor thread start (it waits for this; see `serve')."
     (setf (relay:relay-foreground relay) color))
   (alexandria:when-let ((color (and background (lem:parse-color background))))
     (setf (relay:relay-background relay) color))
-  (write-bodies output lock
-                (list (codec:response
+  (send-numbered output lock state
+                (lambda (seq)
+                  (declare (ignore seq))
+                  (list (codec:response
                        id
                        (let ((result (make-hash-table :test 'equal))
                              (size (make-hash-table :test 'equal)))
@@ -34,7 +41,7 @@ let the editor thread start (it waits for this; see `serve')."
                                (gethash "foreground" result) foreground
                                (gethash "background" result) background
                                (gethash "size" result) size)
-                         result))))
+                         result)))))
   (bt2:signal-semaphore ready))
 
 (defun handle (relay output lock ready state message)
@@ -42,7 +49,7 @@ let the editor thread start (it waits for this; see `serve')."
     (ecase (first request)
       (:login
        (destructuring-bind (id width height foreground background) (rest request)
-         (login relay output lock ready id width height foreground background)))
+         (login relay output lock state ready id width height foreground background)))
       (:redraw
        ;; lem-server's `redraw' resizes and forces a full repaint; a
        ;; :resize does both (`lem:update-on-display-resized').
@@ -76,7 +83,8 @@ answer from this one), so they are serialised."
         (reader (bt2:current-thread)))
     (setf (relay:relay-sink relay)
           (lambda (message)
-            (write-bodies output lock (codec:encode message state))))
+            (send-numbered output lock state
+                           (lambda (seq) (codec:encode message state seq)))))
     (catch 'editor-exited
       (setf (relay:relay-editor-thread relay)
             (funcall function
