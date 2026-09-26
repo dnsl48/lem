@@ -62,11 +62,12 @@ fn main() -> Result<()> {
     // would restore the terminal before the first frame is painted.
     let guard = term::Guard::new_if_interactive()?;
     let styled_underlines = support::styled_underlines(|name| std::env::var(name).ok());
+    let hyperlinks = support::hyperlinks(|name| std::env::var(name).ok());
     let mut presenter = match &guard {
-        Some(guard) => Some(Presenter::new(
-            BufWriter::new(guard.writer()?),
-            styled_underlines,
-        )),
+        Some(guard) => Some(
+            Presenter::new(BufWriter::new(guard.writer()?), styled_underlines)
+                .with_hyperlinks(hyperlinks),
+        ),
         None => None,
     };
 

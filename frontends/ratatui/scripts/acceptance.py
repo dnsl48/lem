@@ -159,14 +159,15 @@ check(11, "Markdown emphasis is drawn in italic",
 s.kill()
 
 # --- 12: underline styles reach the terminal, or fall back ---------------
-# A scratch LEM_HOME whose init.lisp marks Markdown links curly, as a user
-# would (ADR 0016). Forced on, the link is drawn with SGR 4:3; forced off,
-# as for a terminal not known to draw it, with a plain SGR 4.
+# A scratch LEM_HOME whose init.lisp makes Markdown links curly, as a user
+# would: by redefining the attribute, which a theme load keeps (ADR 0017).
+# Forced on, the link is drawn with SGR 4:3; forced off, as for a terminal
+# not known to draw it, with a plain SGR 4.
 home = "/tmp/lem-accept-undercurl/"
 os.makedirs(home, exist_ok=True)
 with open(os.path.join(home, "init.lisp"), "w") as f:
-    f.write("#+lem-ratatui\n(push '(lem:document-link-attribute (:underline-style :curly))\n"
-            "      lem-ratatui/font-styles:*attribute-font-styles*)\n")
+    f.write("(lem:define-attribute lem:document-link-attribute\n"
+            "  (t :underline t :underline-style :curly))\n")
 with open("/tmp/lem-accept-link.md", "w") as f:
     f.write("see [a link](https://example.com) here\n")
 def link_drawn(forced):
@@ -181,6 +182,24 @@ curly, straight = link_drawn("1"), link_drawn("0")
 check(12, "a curly underline reaches the terminal, and falls back to straight",
       "\x1b[4:3m" in curly and "\x1b[4:" not in straight and "\x1b[4m" in straight,
       f"curly: {'\x1b[4:3m' in curly}; fallback straight: {'\x1b[4m' in straight and '\x1b[4:' not in straight}")
+
+# --- 13: web addresses become terminal hyperlinks, or stay text ----------
+# ADR 0018. A bare address and a Markdown link's; forced off, as for a
+# terminal not known to make hyperlinks, no OSC 8 at all.
+with open("/tmp/lem-accept-links.md", "w") as f:
+    f.write("plain https://example.com/plain here\nsee [a link](https://example.com/md) here\n")
+def links_drawn(forced):
+    s = Session(env={"LEM_RATATUI_HYPERLINKS": forced}); s.pump(8)
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)
+    m = s.mark()
+    s.send("/tmp/lem-accept-links.md"); s.send([b"\r"]); s.pump(3)
+    drawn = s.since(m)
+    s.kill()
+    return re.findall(r"\x1b\]8;id=[0-9a-f]+;([^\x1b]*)\x1b\\", drawn), "\x1b]8;" in drawn
+(on, _), (_, off) = links_drawn("1"), links_drawn("0")
+check(13, "web addresses reach the terminal as hyperlinks, and only when supported",
+      "https://example.com/plain" in on and "https://example.com/md" in on and not off,
+      f"linked: {sorted(set(on))}; sent when off: {off}")
 
 print()
 failed = [r for r in results if not r[2]]

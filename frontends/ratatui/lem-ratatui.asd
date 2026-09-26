@@ -4,11 +4,12 @@
                ;; As lem-ncurses: the modes and extensions. lem-server used
                ;; to bring these in; nothing else here does.
                (:feature (:not :lem-minimal-build) "lem/extensions")
+               "cl-ppcre"
                "lem-relay"
                "lem-relay/protobuf")
   :serial t
   :pathname "lisp/"
   :components ((:file "implementation")
                (:file "transport")
-               (:file "font-styles")
+               (:file "links")
                (:file "main")))

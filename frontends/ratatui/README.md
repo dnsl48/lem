@@ -69,7 +69,7 @@ lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' class: relay + capability flags
   transport.lisp             stdin/stdout as the wire, everything else muffled
-  font-styles.lisp           which attributes are italic, struck through, dim
+  links.lisp                 web addresses as hyperlinks (ADR 0018)
   main.lisp                  entry point, and lem-if:invoke
 relay/                       lem-relay (ADR 0009, 0012)
   lem-relay.asd              lem-relay, lem-relay/protobuf, lem-relay/tests
@@ -284,7 +284,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 12 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 13 checks
 ```
 
 ## Next steps
@@ -311,16 +311,17 @@ Nothing here is required for the PoC; each is its own piece of work.
 
 ## Keys and mouse
 
-**Font styles.** Markdown emphasis is drawn in italic. Any attribute can
-be italic, struck through or dim, through its property list
-([ADR 0015](docs/adr/0015-font-styles-without-touching-lem.md)): in a
-definition, `(define-attribute my-attribute (t :foreground "#aaaaaa"
-:plist '(:italic t)))`; for attributes defined elsewhere, in `init.lisp`,
+**Font styles.** Markdown emphasis is drawn in italic. Lem's attributes
+can be italic, struck through or dim, and have an underline style
+([ADR 0017](docs/adr/0017-font-styles-and-links-in-lem-attributes.md), a
+small patch to Lem core carried here until upstream takes it). Give them
+in an attribute's definition or in a theme; to change one defined
+elsewhere, redefine it in `init.lisp`, which a theme load keeps:
 
 ```lisp
-#+lem-ratatui
-(push '(lem:syntax-comment-attribute :italic :dim)
-      lem-ratatui/font-styles:*attribute-font-styles*)
+(lem:define-attribute lem:syntax-comment-attribute
+  (:light :foreground "#cd0000" :italic t)
+  (:dark :foreground "chocolate1" :italic t))
 ```
 
 **Underline styles.** LSP diagnostics and Lisp compiler notes get a curly
@@ -328,9 +329,19 @@ underline, in terminals that draw one: kitty, WezTerm, foot, Alacritty,
 Ghostty, iTerm2 and VTE-based ones (GNOME Terminal and others). Elsewhere,
 and inside tmux or screen, they are underlined straight, as before.
 `LEM_RATATUI_UNDERCURL=1` or `0` overrides the detection. Any attribute can
-ask for `(:underline-style :curly)`, `:dotted`, `:dashed` or `:double` in
-the same list, or with `:plist '(:underline-style :dotted)`
+ask for `:underline-style :curly`, `:dotted`, `:dashed` or `:double`
 ([ADR 0016](docs/adr/0016-underline-styles.md)).
+
+**Hyperlinks.** Web addresses in any buffer are terminal hyperlinks (OSC 8)
+in terminals that make them: kitty, WezTerm, foot, Alacritty, Ghostty,
+iTerm2, VTE-based ones, Konsole and Windows Terminal. Hovering shows the
+address; the terminal opens it with its bypass modifier, usually
+Shift+click (Ctrl+click in VTE), since a plain click goes to Lem. Inside
+tmux or screen, and elsewhere, the text is drawn as before.
+`LEM_RATATUI_HYPERLINKS=1` or `0` overrides the detection (tmux 3.4 passes
+links on with its `hyperlinks` feature), and
+`(setf lem-ratatui/links:*links* nil)` in `init.lisp` turns them off
+([ADR 0018](docs/adr/0018-hyperlinks.md)).
 
 **C-]** interrupts the editor when it is busy (`abort`), as in the ncurses
 and browser frontends. C-g is an ordinary key, so `keyboard-quit` works as

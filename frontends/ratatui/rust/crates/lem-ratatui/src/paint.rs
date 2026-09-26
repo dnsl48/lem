@@ -1,6 +1,7 @@
 //! Turning `lem.relay.v1` ops into cells.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use lem_protocol::v1::{self, UnderlineStyle};
 use ratatui_core::buffer::Buffer;
@@ -77,19 +78,36 @@ impl Styles {
     }
 }
 
-/// Each cell's underline style, beside a buffer of the same size. It only
-/// shows where the cell is underlined.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnderlineGrid {
-    width: u16,
-    styles: Vec<UnderlineStyle>,
+/// The URL a cell links to (ADR 0018). Shared: every cell of a link, and
+/// every copy of the layer, holds the same one.
+pub type Link = Arc<str>;
+
+/// The longest URL made a link. Terminals cap them too (kitty and VTE at
+/// about 2 KiB); a longer one is drawn as plain text.
+pub const LINK_LIMIT: usize = 2048;
+
+/// `url` as a link, if it can be one: non-empty, within `LINK_LIMIT`, and
+/// printable ASCII only, as OSC 8 requires. The URL comes from buffer
+/// text, so anything else, an escape above all, could reach the terminal
+/// as a command; the relay drops such URLs, and so does the display.
+pub fn link_of(url: &str) -> Option<Link> {
+    let printable = url.bytes().all(|b| (0x20..=0x7E).contains(&b));
+    (printable && !url.is_empty() && url.len() <= LINK_LIMIT).then(|| Arc::from(url))
 }
 
-impl UnderlineGrid {
-    pub fn new(width: u16, height: u16) -> Self {
+/// One value per cell, beside a buffer of the same size: what Ratatui's
+/// cell cannot hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grid<T> {
+    width: u16,
+    values: Vec<T>,
+}
+
+impl<T: Clone> Grid<T> {
+    pub fn new(width: u16, height: u16, value: T) -> Self {
         Self {
             width,
-            styles: vec![UnderlineStyle::Straight; usize::from(width) * usize::from(height)],
+            values: vec![value; usize::from(width) * usize::from(height)],
         }
     }
 
@@ -97,31 +115,50 @@ impl UnderlineGrid {
         usize::from(y) * usize::from(self.width) + usize::from(x)
     }
 
-    pub fn get(&self, x: u16, y: u16) -> UnderlineStyle {
-        self.styles[self.index(x, y)]
+    pub fn get(&self, x: u16, y: u16) -> &T {
+        &self.values[self.index(x, y)]
     }
 
-    pub fn set(&mut self, x: u16, y: u16, style: UnderlineStyle) {
+    pub fn set(&mut self, x: u16, y: u16, value: T) {
         let i = self.index(x, y);
-        self.styles[i] = style;
+        self.values[i] = value;
     }
 }
 
-/// Cells, and their underline styles beside them: what a view paints into
-/// and what the screen is composited into (ADR 0016). Every operation here
-/// keeps the two in step.
+/// Cells, with each one's underline style and link beside them: what a
+/// view paints into and what the screen is composited into (ADR 0016,
+/// 0018). Every operation here keeps the three in step.
+///
+/// The underline style only shows where the cell is underlined.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     pub cells: Buffer,
-    pub underline: UnderlineGrid,
+    pub underline: Grid<UnderlineStyle>,
+    pub link: Grid<Option<Link>>,
 }
 
 impl Layer {
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             cells: Buffer::empty(Rect::new(0, 0, width, height)),
-            underline: UnderlineGrid::new(width, height),
+            underline: Grid::new(width, height, UnderlineStyle::Straight),
+            link: Grid::new(width, height, None),
         }
+    }
+
+    /// Copy cell (`sx`, `sy`) of `source`, with its underline style and
+    /// link, to (`x`, `y`).
+    pub fn copy_cell(&mut self, x: u16, y: u16, source: &Layer, sx: u16, sy: u16) {
+        self.cells[(x, y)] = source.cells[(sx, sy)].clone();
+        self.underline.set(x, y, *source.underline.get(sx, sy));
+        self.link.set(x, y, source.link.get(sx, sy).clone());
+    }
+
+    /// Set the symbol of cell (`x`, `y`), which is no longer part of any
+    /// link: a border or separator drawn over text.
+    pub fn set_symbol(&mut self, x: u16, y: u16, symbol: &str) {
+        self.cells[(x, y)].set_symbol(symbol);
+        self.link.set(x, y, None);
     }
 
     pub fn area(&self) -> Rect {
@@ -140,6 +177,19 @@ impl Layer {
     /// and it clips at `width` and at the right edge. It indexes the row
     /// directly, so the row bound is checked here.
     pub fn put(&mut self, x: u16, y: u16, text: &str, width: u16, paint: Paint) {
+        self.put_linked(x, y, text, width, paint, None);
+    }
+
+    /// `put`, the run linking to `link` (ADR 0018).
+    pub fn put_linked(
+        &mut self,
+        x: u16,
+        y: u16,
+        text: &str,
+        width: u16,
+        paint: Paint,
+        link: Option<&Link>,
+    ) {
         let area = self.area();
         if y >= area.height || x >= area.width {
             return;
@@ -154,12 +204,14 @@ impl Layer {
         }
         for cx in x..limit.max(end) {
             self.underline.set(cx, y, paint.underline);
+            self.link.set(cx, y, link.cloned());
         }
     }
 
     fn reset(&mut self, x: u16, y: u16) {
         self.cells[(x, y)].reset();
         self.underline.set(x, y, UnderlineStyle::Straight);
+        self.link.set(x, y, None);
     }
 
     /// Blank the rest of row `y` from column `x`.
@@ -314,11 +366,15 @@ mod tests {
     fn a_run_sets_its_underline_style_on_every_cell_it_takes() {
         let mut layer = Layer::new(8, 1);
         layer.put(1, 0, "ab", 4, curly());
-        assert_eq!(layer.underline.get(0, 0), UnderlineStyle::Straight);
+        assert_eq!(*layer.underline.get(0, 0), UnderlineStyle::Straight);
         for x in 1..5 {
-            assert_eq!(layer.underline.get(x, 0), UnderlineStyle::Curly, "cell {x}");
+            assert_eq!(
+                *layer.underline.get(x, 0),
+                UnderlineStyle::Curly,
+                "cell {x}"
+            );
         }
-        assert_eq!(layer.underline.get(5, 0), UnderlineStyle::Straight);
+        assert_eq!(*layer.underline.get(5, 0), UnderlineStyle::Straight);
     }
 
     #[test]
@@ -329,12 +385,12 @@ mod tests {
         }
         layer.clear_eol(2, 0);
         assert_eq!(layer.cells[(1, 0)].symbol(), "b");
-        assert_eq!(layer.underline.get(1, 0), UnderlineStyle::Curly);
+        assert_eq!(*layer.underline.get(1, 0), UnderlineStyle::Curly);
         assert_eq!(layer.cells[(2, 0)].symbol(), " ");
-        assert_eq!(layer.underline.get(2, 0), UnderlineStyle::Straight);
+        assert_eq!(*layer.underline.get(2, 0), UnderlineStyle::Straight);
         layer.clear_eob(2);
         assert_eq!(layer.cells[(0, 1)].symbol(), "a", "row 1 untouched");
-        assert_eq!(layer.underline.get(0, 2), UnderlineStyle::Straight);
+        assert_eq!(*layer.underline.get(0, 2), UnderlineStyle::Straight);
     }
 
     #[test]
@@ -346,5 +402,37 @@ mod tests {
         layer.clear_eol(0, 9);
         layer.clear_eob(9);
         assert_eq!(layer.cells[(3, 0)].symbol(), "l");
+    }
+
+    #[test]
+    fn only_printable_ascii_urls_are_links() {
+        assert_eq!(
+            link_of("https://example.com/a?b=c").as_deref(),
+            Some("https://example.com/a?b=c")
+        );
+        assert!(link_of("").is_none());
+        assert!(
+            link_of("https://x/\x1b]8;;evil\x1b\\").is_none(),
+            "an escape"
+        );
+        assert!(link_of("https://x/\x07").is_none(), "a bell ends OSC too");
+        assert!(link_of("https://x/\u{e9}").is_none(), "not ASCII");
+        assert!(link_of(&format!("https://x/{}", "a".repeat(LINK_LIMIT))).is_none());
+    }
+
+    #[test]
+    fn a_linked_run_links_every_cell_it_takes() {
+        let mut layer = Layer::new(8, 1);
+        let link = link_of("https://example.com");
+        layer.put_linked(1, 0, "ab", 4, plain(), link.as_ref());
+        assert_eq!(*layer.link.get(0, 0), None);
+        for x in 1..5 {
+            assert_eq!(*layer.link.get(x, 0), link, "cell {x}");
+        }
+        assert_eq!(*layer.link.get(5, 0), None);
+        layer.put(1, 0, "ab", 2, plain());
+        assert_eq!(*layer.link.get(1, 0), None, "unlinked when repainted");
+        layer.clear_eol(0, 0);
+        assert_eq!(*layer.link.get(3, 0), None, "and when cleared");
     }
 }

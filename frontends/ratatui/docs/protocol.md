@@ -80,8 +80,8 @@ last one, in order, then state.
 - **Styles** are defined in the first frame that uses each, by id, and
   are stable for the session; 0 is no style. Colours are packed
   `0xRRGGBB`, and an absent colour means the default, not black. Italic,
-  strikethrough and dim come from the attribute's property list
-  (ADR 0015), and so does the underline style (ADR 0016). That style
+  strikethrough, dim and the underline style are the attribute's own
+  (ADR 0016, 0017). The underline style
   states what Lem wants: a display draws a style its terminal cannot as a
   straight underline.
 - **`Defaults`** come in the first frame and whenever a theme changes
@@ -93,6 +93,10 @@ last one, in order, then state.
 - **`input_seq`** is the last display message the relay had handed to
   Lem when it closed the frame: what the frame can reflect. It means
   handed to Lem's event queue, not processed by Lem.
+- **A put's `link`** is the URL its text links to, when it has one
+  (ADR 0018): printable ASCII only, at most 2048 characters. The display
+  makes it an OSC 8 hyperlink where the terminal makes them, and draws
+  the text plainly elsewhere.
 - **A put's `width` is authoritative.** The display fits the text to
   exactly that many cells, clipping or padding, so a character whose
   width the two sides disagree on stays inside its run.

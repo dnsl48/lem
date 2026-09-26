@@ -2,7 +2,7 @@
 
 # ToDisplay
 seq: 1
-time_us: 11185031
+time_us: 27061112
 frame {
   styles {
     id: 1
@@ -127,8 +127,11 @@ frame {
 
 # ToDisplay
 seq: 2
-time_us: 11189031
+time_us: 27066112
 frame {
+  styles {
+    id: 7
+  }
   ops {
     line_cleared {
       view: 1
@@ -187,6 +190,26 @@ frame {
       y: 1
       text: " "
       width: 1
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 10
+      y: 1
+      text: "https://lem-project.github.io"
+      width: 29
+      style: 7
+      link: "https://lem-project.github.io"
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 39
+      y: 1
+      text: " "
+      width: 1
       style: 1
     }
   }
@@ -228,13 +251,13 @@ frame {
         style: 4
       }
       runs {
-        x: 68
-        text: " 2:9 "
-        width: 5
+        x: 67
+        text: " 2:39 "
+        width: 6
         style: 5
       }
       runs {
-        x: 56
+        x: 55
         text: "Fundamental "
         width: 12
         style: 6
@@ -243,7 +266,7 @@ frame {
   }
   cursor {
     view: 1
-    x: 9
+    x: 39
     y: 1
     shape: CURSOR_SHAPE_BOX
   }
@@ -251,34 +274,34 @@ frame {
 
 # ToDisplay
 seq: 3
-time_us: 11190031
+time_us: 27067112
 frame {
   styles {
-    id: 7
+    id: 8
     bold: true
     background: 2171169
     foreground: 7368816
   }
   styles {
-    id: 8
+    id: 9
     bold: true
     background: 2171169
     foreground: 10052352
   }
   styles {
-    id: 9
+    id: 10
     bold: true
     background: 5263440
     foreground: 0
   }
   styles {
-    id: 10
+    id: 11
     bold: true
     background: 2105376
     foreground: 8947848
   }
   styles {
-    id: 11
+    id: 12
     bold: true
     background: 2171169
     foreground: 3298695
@@ -352,6 +375,26 @@ frame {
     }
   }
   ops {
+    put {
+      view: 2
+      x: 9
+      y: 1
+      text: " "
+      width: 1
+    }
+  }
+  ops {
+    put {
+      view: 2
+      x: 10
+      y: 1
+      text: "https://lem-project.github.io"
+      width: 29
+      style: 7
+      link: "https://lem-project.github.io"
+    }
+  }
+  ops {
     rest_cleared {
       view: 2
       y: 2
@@ -363,42 +406,42 @@ frame {
       runs {
         text: "                                                                                "
         width: 80
-        style: 7
+        style: 8
       }
       runs {
         text: "  "
         width: 2
-        style: 7
+        style: 8
       }
       runs {
         x: 2
         text: " •"
         width: 3
-        style: 7
+        style: 8
       }
       runs {
         x: 5
         text: "*tmp*"
         width: 5
-        style: 8
+        style: 9
       }
       runs {
         x: 73
         text: "  All  "
         width: 7
-        style: 9
-      }
-      runs {
-        x: 68
-        text: " 2:9 "
-        width: 5
         style: 10
       }
       runs {
-        x: 56
+        x: 67
+        text: " 2:39 "
+        width: 6
+        style: 11
+      }
+      runs {
+        x: 55
         text: "Fundamental "
         width: 12
-        style: 11
+        style: 12
       }
     }
   }
@@ -460,6 +503,26 @@ frame {
       y: 1
       text: " "
       width: 1
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 10
+      y: 1
+      text: "https://lem-project.github.io"
+      width: 29
+      style: 7
+      link: "https://lem-project.github.io"
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 39
+      y: 1
+      text: " "
+      width: 1
       style: 1
     }
   }
@@ -501,13 +564,13 @@ frame {
         style: 4
       }
       runs {
-        x: 68
-        text: " 2:9 "
-        width: 5
+        x: 67
+        text: " 2:39 "
+        width: 6
         style: 5
       }
       runs {
-        x: 56
+        x: 55
         text: "Fundamental "
         width: 12
         style: 6
@@ -522,7 +585,7 @@ frame {
   }
   cursor {
     view: 1
-    x: 9
+    x: 39
     y: 1
     shape: CURSOR_SHAPE_BOX
   }
@@ -530,12 +593,12 @@ frame {
 
 # ToDisplay
 seq: 4
-time_us: 11215031
+time_us: 27121112
 frame {
   ops {
     view_created {
       view: 3
-      x: 10
+      x: 40
       y: 3
       width: 7
       height: 1
@@ -595,6 +658,26 @@ frame {
     }
   }
   ops {
+    put {
+      view: 2
+      x: 9
+      y: 1
+      text: " "
+      width: 1
+    }
+  }
+  ops {
+    put {
+      view: 2
+      x: 10
+      y: 1
+      text: "https://lem-project.github.io"
+      width: 29
+      style: 7
+      link: "https://lem-project.github.io"
+    }
+  }
+  ops {
     rest_cleared {
       view: 2
       y: 2
@@ -658,6 +741,26 @@ frame {
       y: 1
       text: " "
       width: 1
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 10
+      y: 1
+      text: "https://lem-project.github.io"
+      width: 29
+      style: 7
+      link: "https://lem-project.github.io"
+    }
+  }
+  ops {
+    put {
+      view: 1
+      x: 39
+      y: 1
+      text: " "
+      width: 1
       style: 1
     }
   }
@@ -688,7 +791,7 @@ frame {
   }
   cursor {
     view: 1
-    x: 9
+    x: 39
     y: 1
     shape: CURSOR_SHAPE_BOX
   }
@@ -696,7 +799,7 @@ frame {
 
 # ToDisplay
 seq: 5
-time_us: 11215031
+time_us: 27121112
 frame {
   ops {
     rest_cleared {
@@ -727,7 +830,7 @@ frame {
   }
   cursor {
     view: 1
-    x: 9
+    x: 39
     y: 1
     shape: CURSOR_SHAPE_BAR
   }
@@ -735,7 +838,7 @@ frame {
 
 # ToDisplay
 seq: 6
-time_us: 11215031
+time_us: 27121112
 set_clipboard {
   text: "copied"
 }

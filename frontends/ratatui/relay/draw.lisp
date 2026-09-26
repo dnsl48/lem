@@ -50,8 +50,9 @@ background itself, but not a terminal."
           ((style-background style) style)
           (t (style-with-background style background)))))
 
-(defun put (view x y text style &optional (width (lem:string-width text)))
-  (make-text-put :view (view-id view) :x x :y y :text text :width width :style style))
+(defun put (view x y text style &optional (width (lem:string-width text)) link)
+  (make-text-put :view (view-id view) :x x :y y :text text :width width
+                 :style style :link link))
 
 (defun note-cursor (view x y)
   "Tell Lem the cursor was drawn at X, Y of VIEW. The relay reads it back
@@ -83,7 +84,8 @@ a second value whether OBJECT is where the cursor is.")
     (let ((attribute (display:text-object-attribute object)))
       (values (list (put view x y (display:text-object-string object)
                          (resolve-style attribute)
-                         (object-width object)))
+                         (object-width object)
+                         (relayed-link (lem:ensure-attribute attribute nil))))
               (and attribute (lem:cursor-attribute-p attribute) t))))
   (:method ((object display:line-end-object) x y view)
     (list (put view (+ x (display:line-end-object-offset object)) y

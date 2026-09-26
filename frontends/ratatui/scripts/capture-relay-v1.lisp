@@ -17,7 +17,9 @@
 (in-package :capture-relay-v1)
 
 (handler-bind ((warning #'muffle-warning))
-  (asdf:load-system "lem-relay/protobuf"))
+  (asdf:load-system "lem-relay/protobuf")
+  ;; For its links (ADR 0018); it brings Lem's extensions with it.
+  (asdf:load-system "lem-ratatui"))
 
 (defclass capture-relay (lem-relay/relay:relay lem:implementation) ()
   (:default-initargs
@@ -66,7 +68,11 @@ and its text-format twin."
                  (lem:insert-string
                   (lem:buffer-point (lem:window-buffer (lem:current-window))) string)))
           (redraw)
-          (type-text (format nil "(defun héllo () 'λ)~%;; 日本語"))
+          (type-text (format nil "(defun héllo () 'λ)~%;; 日本語 https://lem-project.github.io"))
+          ;; The scan Lem runs on the edited lines, which puts the links.
+          (let ((buffer (lem:window-buffer (lem:current-window))))
+            (lem-ratatui/links:scan-links (lem:buffer-start-point buffer)
+                                          (lem:buffer-end-point buffer)))
           (lem:redraw-display)
           (lem:split-window-vertically (lem:current-window))
           (redraw)

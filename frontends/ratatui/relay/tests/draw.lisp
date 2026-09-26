@@ -26,6 +26,29 @@
       (ok (= 5 (text-put-width put)))
       (ok (eql #xAABBCC (style-foreground (text-put-style put)))))))
 
+(deftest a-url-in-the-attribute-is-the-put-s-link
+  ;; ADR 0017, 0018: the link is merged over the text's own look, which it
+  ;; does not change.
+  (let* ((link (lem:make-attribute :link "https://example.com"))
+         (look (lem:make-attribute :foreground "#AABBCC" :underline t))
+         (put (first (object-puts (text "site" (lem-core:merge-attribute look link))
+                                  0 0 (a-view)))))
+    (ok (equal "https://example.com" (text-put-link put)))
+    (ok (eql #xAABBCC (style-foreground (text-put-style put))))
+    (ok (style-underline (text-put-style put))))
+  (ok (null (text-put-link (first (object-puts (text "plain") 0 0 (a-view)))))))
+
+(deftest only-printable-ascii-urls-are-links
+  (flet ((link-of (url)
+           (relayed-link (lem:make-attribute :link url))))
+    (ok (equal "https://example.com/a?b=c" (link-of "https://example.com/a?b=c")))
+    (ok (null (link-of (format nil "https://x/~C]8;;evil" (code-char 27)))) "an escape")
+    (ok (null (link-of (format nil "https://x/~C" (code-char 7)))) "a bell")
+    (ok (null (link-of "https://x/é")) "not ASCII")
+    (ok (null (link-of "")))
+    (ok (null (link-of (concatenate 'string "https://x/" (make-string 2048 :initial-element #\a)))))
+    (ok (null (link-of 'not-a-string)))))
+
 (deftest widths-are-cells-not-characters
   ;; The relay's width is what the display will fit the run to (ADR 0012).
   (ok (= 4 (object-width (text "日本"))))
@@ -127,7 +150,7 @@ on T, so this proves the same thing."))
 (deftest a-popup-background-keeps-font-styles
   (let ((lem-if:*background-color-of-drawing-window* "#202020"))
     (let ((style (text-put-style (first (object-puts
-                                         (text "a" (lem:make-attribute :plist '(:italic t)))
+                                         (text "a" (lem:make-attribute :italic t))
                                          0 0 (a-view))))))
       (ok (eql #x202020 (style-background style)))
       (ok (style-italic style)))))

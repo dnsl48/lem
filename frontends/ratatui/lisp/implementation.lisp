@@ -3,6 +3,9 @@
   (:export :ratatui))
 (in-package :lem-ratatui/implementation)
 
+;;; So an init.lisp shared with other frontends can say #+lem-ratatui.
+(pushnew :lem-ratatui *features*)
+
 (defclass ratatui (lem-relay/relay:relay lem-core:implementation)
   ()
   (:default-initargs

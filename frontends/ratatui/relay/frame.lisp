@@ -16,8 +16,6 @@
    :style-underline-style
    :*underline-styles*
    :style-with-background
-   :mark-font-styles
-   :*font-style-keys*
    :attribute-style
    :pack-color
    ;; Ops: what a frame asks the display to do.
@@ -59,6 +57,8 @@
    :text-put-text
    :text-put-width
    :text-put-style
+   :text-put-link
+   :relayed-link
    :line-cleared
    :make-line-cleared
    :line-cleared-view
@@ -101,14 +101,10 @@
    :finish-frame))
 (in-package :lem-relay/frame)
 
-(defparameter *font-style-keys* '(:italic :strikethrough :dim)
-  "The keys in a Lem attribute's property list the relay reads as font
-styles (ADR 0015). Lem's attribute has no slots for them; the property
-list carries them through merging and theme loads.")
-
 (defparameter *underline-styles* '(:curly :dotted :dashed :double)
-  "The values of `:underline-style' in a Lem attribute's property list
-(ADR 0016). Absent, or anything else, is a straight underline.")
+  "The values of a Lem attribute's underline style the display draws
+(ADR 0016, 0017). NIL, :straight or anything else is a straight
+underline.")
 
 ;;; Styles
 
@@ -119,11 +115,11 @@ list carries them through merging and theme loads.")
 
 Colours are packed #xRRGGBB integers, or NIL for the default colour (see
 `defaults'). UNDERLINE is NIL, T, or a packed colour. CURSOR marks a cell
-painted as a cursor. ITALIC, STRIKETHROUGH and DIM come from the
-attribute's property list (ADR 0015), as does UNDERLINE-STYLE, one of
-`*underline-styles*' or NIL for straight (ADR 0016). Styles compare by content: equal
-slots are the same style, however many Lem attribute objects produced
-them."
+painted as a cursor. ITALIC, STRIKETHROUGH, DIM and UNDERLINE-STYLE are
+the attribute's own (ADR 0017); UNDERLINE-STYLE is one of
+`*underline-styles*', or NIL for straight. Styles compare by content:
+equal slots are the same style, however many Lem attribute objects
+produced them."
   (foreground nil :read-only t)
   (background nil :read-only t)
   (bold nil :read-only t)
@@ -170,38 +166,27 @@ Every colour spelling Lem accepts becomes one packed integer, as
                   :reverse (and (lem:attribute-reverse attribute) t)
                   :underline (and underline (or (pack-color underline) t))
                   :cursor (and (lem:cursor-attribute-p attribute) t)
-                  :italic (and (lem:attribute-value attribute :italic) t)
-                  :strikethrough (and (lem:attribute-value attribute :strikethrough) t)
-                  :dim (and (lem:attribute-value attribute :dim) t)
-                  :underline-style (find (lem:attribute-value attribute :underline-style)
+                  :italic (and (lem:attribute-italic attribute) t)
+                  :strikethrough (and (lem:attribute-strikethrough attribute) t)
+                  :dim (and (lem:attribute-dim attribute) t)
+                  :underline-style (find (lem:attribute-underline-style attribute)
                                          *underline-styles*)))))
 
-(defun mark-font-styles (entries)
-  "Set font styles on named Lem attributes. ENTRIES is a list of
-(ATTRIBUTE-NAME STYLE...), each STYLE one of `*font-style-keys*', or
-(:underline-style S) with S one of `*underline-styles*':
+;; A URL is passed on only if it is plain printable ASCII, as OSC 8 needs,
+;; and not absurdly long; anything else could carry a terminal escape.
+(defconstant +link-length-limit+ 2048
+  "The longest URL passed on as a link, in characters.")
 
-  ((lem:document-italic-attribute :italic)
-   (lem:syntax-comment-attribute :italic :dim)
-   (lem:compiler-note-attribute (:underline-style :curly)))
-
-Marks the attribute objects Lem holds now. A theme load rebuilds them,
-so call this after every one (`lem:*after-load-theme-hook*'). An
-attribute not defined is skipped. Returns how many were marked."
-  (loop :for (name . keys) :in entries
-        :for attribute := (lem:ensure-attribute name nil)
-        :when attribute
-          :count (progn
-                   (dolist (key keys)
-                     (cond ((member key *font-style-keys*)
-                            (setf (lem:attribute-value attribute key) t))
-                           ((and (consp key) (eq :underline-style (first key))
-                                 (member (second key) *underline-styles*))
-                            (setf (lem:attribute-value attribute :underline-style) (second key)))
-                           (t
-                            (error "~S is not a font style: one of ~S, or (:underline-style S) with S one of ~S."
-                                   key *font-style-keys* *underline-styles*))))
-                   t)))
+(defun relayed-link (attribute)
+  "The URL a Lem ATTRIBUTE links its text to (`lem:attribute-link'), or
+NIL. A URL with anything but printable ASCII in it, or longer than
+`+link-length-limit+', is no link (ADR 0018)."
+  (let ((url (and (lem:attribute-p attribute)
+                  (lem:attribute-link attribute))))
+    (when (and (stringp url)
+               (< 0 (length url) (1+ +link-length-limit+))
+               (every (lambda (c) (char<= #\Space c #\~)) url))
+      url)))
 
 ;;; Ops
 
@@ -227,11 +212,12 @@ attribute not defined is skipped. Returns how many were marked."
   "The order views composite in, bottom first: a list of view ids."
   views)
 
-(defstruct (text-put (:constructor make-text-put (&key view x y text width style)))
+(defstruct (text-put (:constructor make-text-put (&key view x y text width style link)))
   "TEXT drawn at cell X, Y of VIEW with STYLE (a `style', or NIL for the
 default colours). WIDTH is the cells Lem laid it out as occupying; the
-display fits TEXT to exactly that many (ADR 0012)."
-  view x y text width style)
+display fits TEXT to exactly that many (ADR 0012). LINK is the URL the
+text links to, or NIL (ADR 0018)."
+  view x y text width style link)
 
 (defstruct (line-cleared (:constructor make-line-cleared (&key view x y)))
   "Row Y of VIEW blanked from column X to its end." view x y)

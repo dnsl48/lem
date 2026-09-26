@@ -8,7 +8,6 @@
 //! section 7.
 
 use lem_protocol::v1::{self, BorderShape, ViewKind};
-use ratatui_core::buffer::Buffer;
 
 use crate::paint::Layer;
 use ratatui_core::layout::Rect;
@@ -87,8 +86,7 @@ fn blit(screen: &mut Layer, source: &Layer, x: u16, y: u16, area: Rect) {
             if tx >= area.width {
                 break;
             }
-            screen.cells[(tx, ty)] = source.cells[(sx, sy)].clone();
-            screen.underline.set(tx, ty, source.underline.get(sx, sy));
+            screen.copy_cell(tx, ty, source, sx, sy);
         }
     }
 }
@@ -113,7 +111,7 @@ fn blit_view(screen: &mut Layer, vb: &ViewBuffer, area: Rect) {
 /// view's origin, which in a terminal is the cell at `x - 1`. A view at
 /// x = 0 has nothing to its left and gets none. The line spans the
 /// modeline row too, matching `height + (useModeline ? 1 : 0)`.
-fn draw_separator(screen: &mut Buffer, view: &View, area: Rect) {
+fn draw_separator(screen: &mut Layer, view: &View, area: Rect) {
     let Some(x) = view.x.checked_sub(1) else {
         return;
     };
@@ -128,7 +126,7 @@ fn draw_separator(screen: &mut Buffer, view: &View, area: Rect) {
         if y >= area.height {
             return;
         }
-        screen[(x, y)].set_symbol(SEPARATOR);
+        screen.set_symbol(x, y, SEPARATOR);
     }
 }
 
@@ -148,11 +146,11 @@ mod glyph {
 ///
 /// Signed coordinates because a border is drawn *outside* its view, and a
 /// window flush against the top or left edge puts part of it at -1.
-fn put_cell(screen: &mut Buffer, x: i32, y: i32, symbol: &str, area: Rect) {
+fn put_cell(screen: &mut Layer, x: i32, y: i32, symbol: &str, area: Rect) {
     if x < 0 || y < 0 || x >= i32::from(area.width) || y >= i32::from(area.height) {
         return;
     }
-    screen[(x as u16, y as u16)].set_symbol(symbol);
+    screen.set_symbol(x as u16, y as u16, symbol);
 }
 
 /// Draw a floating window's border.
@@ -162,7 +160,7 @@ fn put_cell(screen: &mut Buffer, x: i32, y: i32, symbol: &str, area: Rect) {
 /// at (x, y) of w by h is ringed by a box at (x-border, y-border) of
 /// (w + 2*border) by (h + 2*border). `left-border` is the exception — a
 /// single rule down the left edge, spanning only the view's own height.
-fn draw_border(screen: &mut Buffer, view: &View, area: Rect) {
+fn draw_border(screen: &mut Layer, view: &View, area: Rect) {
     if view.border == 0 {
         return;
     }
@@ -294,13 +292,13 @@ impl Registry {
             blit_view(screen, vb, area);
         }
         for vb in &tiles {
-            draw_separator(&mut screen.cells, &vb.view, area);
+            draw_separator(screen, &vb.view, area);
         }
         for vb in &above {
             // Border first: it rings the view rather than overlapping it,
             // but drawing it first keeps a neighbouring window's content
             // from being clipped by our frame.
-            draw_border(&mut screen.cells, &vb.view, area);
+            draw_border(screen, &vb.view, area);
             blit_view(screen, vb, area);
         }
     }
@@ -397,8 +395,30 @@ mod tests {
             .set(1, 0, v1::UnderlineStyle::Curly);
         let mut screen = Layer::new(8, 3);
         registry.composite(&mut screen);
-        assert_eq!(screen.underline.get(3, 1), v1::UnderlineStyle::Curly);
-        assert_eq!(screen.underline.get(2, 1), v1::UnderlineStyle::Straight);
+        assert_eq!(*screen.underline.get(3, 1), v1::UnderlineStyle::Curly);
+        assert_eq!(*screen.underline.get(2, 1), v1::UnderlineStyle::Straight);
+    }
+
+    #[test]
+    fn compositing_carries_links_and_a_border_is_never_linked() {
+        let link = crate::paint::link_of("https://example.com");
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 8, 1, ViewKind::Tile));
+        registry.get_mut(1).unwrap().body.put_linked(
+            0,
+            0,
+            "linklink",
+            8,
+            crate::paint::Paint::default(),
+            link.as_ref(),
+        );
+        // A 2x1 floating window at (5, 1): its border's top row crosses
+        // the link from (4, 0) to (7, 0).
+        registry.insert(floating(2, 5, 1, 2, 1));
+        let mut screen = Layer::new(8, 3);
+        registry.composite(&mut screen);
+        assert_eq!(*screen.link.get(1, 0), link);
+        assert_eq!(*screen.link.get(5, 0), None, "under the border");
     }
 
     #[test]

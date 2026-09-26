@@ -116,6 +116,23 @@ fn the_session_paints_what_was_done() {
 }
 
 #[test]
+fn a_web_address_is_put_with_its_link() {
+    let ops = ops();
+    let linked: Vec<&v1::Put> = ops
+        .iter()
+        .filter_map(|o| match o {
+            op::Op::Put(put) if put.link.is_some() => Some(put),
+            _ => None,
+        })
+        .collect();
+    assert!(!linked.is_empty(), "the address was linked");
+    for put in linked {
+        assert_eq!(put.link.as_deref(), Some("https://lem-project.github.io"));
+        assert_eq!(put.text, "https://lem-project.github.io", "only the address");
+    }
+}
+
+#[test]
 fn the_popup_is_stacked_on_top() {
     let popup = ops()
         .iter()

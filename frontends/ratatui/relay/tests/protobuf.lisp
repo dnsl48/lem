@@ -78,6 +78,23 @@
       (ng (pb:cursor.hidden cursor)))
     (ok (pb:frame.has-defaults pb-frame) "the first frame's default colours")))
 
+(deftest a-put-carries-its-link-when-it-has-one
+  (let* ((session (make-session)))
+    (add-op session (make-view-created :view 1 :x 0 :y 0 :width 80 :height 23
+                                       :kind :tile :modeline-p t))
+    (add-op session (make-text-put :view 1 :x 0 :y 0 :text "site" :width 4
+                                   :link "https://example.com"))
+    (add-op session (make-text-put :view 1 :x 4 :y 0 :text "x" :width 1))
+    (let ((puts (mapcar #'pb:op.put
+                        (remove 'pb:put (pb:frame.ops
+                                         (pb:to-display.frame
+                                          (to-display (codec:encode (finish-frame session nil)
+                                                                    (codec:make-codec-state) 1))))
+                                :key #'pb:op.op-case :test-not #'eq))))
+      (ok (pb:put.has-link (first puts)))
+      (ok (equal "https://example.com" (pb:put.link (first puts))))
+      (ng (pb:put.has-link (second puts)) "unset, not empty"))))
+
 (deftest a-style-is-defined-once-and-referred-to-by-id
   (let* ((state (codec:make-codec-state))
          (session (make-session))
