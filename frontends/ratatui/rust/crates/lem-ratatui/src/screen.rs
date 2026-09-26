@@ -52,9 +52,16 @@ impl Screen {
             op::Op::ViewsStacked(stacked) => views.stack(stacked.views),
             op::Op::Put(p) => {
                 let paint = self.styles.get(p.style);
+                let link = p.link.as_deref().and_then(paint::link_of);
                 if let Some(vb) = views.get_mut(p.view) {
-                    vb.body
-                        .put(cells(p.x), cells(p.y), &p.text, cells(p.width), paint);
+                    vb.body.put_linked(
+                        cells(p.x),
+                        cells(p.y),
+                        &p.text,
+                        cells(p.width),
+                        paint,
+                        link.as_ref(),
+                    );
                 }
             }
             op::Op::LineCleared(c) => {
@@ -150,6 +157,7 @@ mod tests {
                 text: text.into(),
                 width: text.chars().count() as u32,
                 style,
+                link: None,
             })),
         }
     }

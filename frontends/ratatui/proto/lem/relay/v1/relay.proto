@@ -263,6 +263,10 @@ message Put {
   uint32 width = 5;
   // A Style id; 0 for default colours and no attributes.
   uint32 style = 6;
+  // The URL the text links to, for the display to make a terminal
+  // hyperlink (OSC 8); absent when it links nowhere. Not part of the
+  // Style: it belongs to this text, not to how it looks (ADR 0018).
+  optional string link = 7;
 }
 
 message LineCleared {

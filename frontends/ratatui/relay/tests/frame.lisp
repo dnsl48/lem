@@ -39,19 +39,18 @@ has already gone out."
   (ok (eql #xFF0000 (style-underline (attribute-style (lem:make-attribute :underline "#FF0000")))))
   (ok (eq t (style-underline (attribute-style (lem:make-attribute :underline t))))))
 
-(deftest font-styles-come-from-the-property-list
+(deftest font-styles-come-from-the-attribute
   (let ((style (attribute-style (lem:make-attribute
                                  :foreground "#FF0000"
-                                 :plist '(:italic t :strikethrough t :dim t)))))
+                                 :italic t :strikethrough t :dim t))))
     (ok (style-italic style))
     (ok (style-strikethrough style))
     (ok (style-dim style)))
   (ng (style-italic (attribute-style (lem:make-attribute :foreground "#FF0000")))))
 
 (deftest font-styles-survive-merging
-  ;; Lem merges a syntax attribute with the region's, say; the property
-  ;; lists are appended, so the italic is kept.
-  (let ((merged (lem:merge-attribute (lem:make-attribute :plist '(:italic t))
+  ;; Lem merges a syntax attribute with the region's, say.
+  (let ((merged (lem:merge-attribute (lem:make-attribute :italic t)
                                      (lem:make-attribute :background "#303030"))))
     (ok (style-italic (attribute-style merged)))
     (ok (eql #x303030 (style-background (attribute-style merged))))))
@@ -62,13 +61,14 @@ has already gone out."
     (ok (and (style-italic style) (style-dim style) (style-cursor style)
              (= 1 (style-foreground style))))))
 
-(deftest an-underline-style-comes-from-the-property-list
+(deftest an-underline-style-comes-from-the-attribute
   (ok (eq :curly (style-underline-style
-                  (attribute-style (lem:make-attribute :underline t
-                                                       :plist '(:underline-style :curly))))))
+                  (attribute-style (lem:make-attribute :underline t :underline-style :curly)))))
   (ok (null (style-underline-style
-             (attribute-style (lem:make-attribute :underline t :plist '(:underline-style :wavy)))))
+             (attribute-style (lem:make-attribute :underline t :underline-style :wavy))))
       "an unknown style is a straight underline")
+  (ok (null (style-underline-style
+             (attribute-style (lem:make-attribute :underline t :underline-style :straight)))))
   (ok (null (style-underline-style (attribute-style (lem:make-attribute :underline t))))))
 
 (deftest a-background-fill-keeps-the-underline-style
