@@ -48,7 +48,7 @@ streams INPUT and OUTPUT, until the editor exits or the display hangs up.
 The body of an implementation's `lem-if:invoke'; FUNCTION is what Lem
 hands that. Returns the editor's crash report, if it left one.
 
-As lem-relay/json's `serve', and ncurses before it: this thread reads,
+As ncurses does (frontends/ncurses/mainloop.lisp): this thread reads,
 the editor runs on its own thread, and the editor's finalize callback
 ends the loop. The editor waits for `Hello', which carries the screen's
 size, and sends its first frame unasked: there is no `redraw' step

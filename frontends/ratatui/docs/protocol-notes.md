@@ -1,5 +1,11 @@
 # Protocol notes: what `lem-server` actually sends
 
+> **Historical.** This records `lem-server`'s JSON-RPC protocol, which the
+> frontend spoke until `lem-relay` replaced it
+> ([ADR 0009](adr/0009-our-own-relay.md)). The protocol it speaks now is
+> described in [`protocol.md`](protocol.md). These notes stay as they
+> were, because the ADRs cite them by section.
+
 Research notes taken while scoping the Ratatui frontend (September 2026).
 Everything here was read out of the tree at `f5ba7d83`; line references are
 to that revision. The purpose is to record *why* the design decisions in

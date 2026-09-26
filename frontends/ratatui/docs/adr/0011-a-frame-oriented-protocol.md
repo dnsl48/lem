@@ -142,3 +142,22 @@ edit to `v1`.
 - **The mouse event shape.** Settle it against what crossterm reports
   and what `lem:receive-mouse-button-down` / `-up` and friends expect.
   The browser sends pixel coordinates alongside cells, and we will not.
+
+## Measurements — September 2026
+
+Taken once the protocol ran end to end (relay-plan.md, phase 2), with
+`scripts/workload.py`: open a file, type 40 characters, save, quit; five
+runs, medians. The first column is where this record started: the
+browser's protocol, with our overrides.
+
+| | `lem-server` + overrides | `lem-relay/json` (phase 1) | `lem.relay.v1` (phase 2) |
+|---|---|---|---|
+| frames | 186 | 190 | 175 |
+| bytes | 315,475 | 265,007 | **59,069** |
+
+A fifth of the bytes. The two changes this record set out to make should
+account for most of it, by the sizes measured before either was made:
+attributes repeated in every put were about 60% of a put (0003), and
+browser-only fields 44% of the captured frames (0006). They were not
+measured apart here. Frame counts stay within about 6% of each other, and
+the ranges of the five runs overlap.
