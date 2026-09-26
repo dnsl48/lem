@@ -71,14 +71,17 @@
     (add-op session (make-views-stacked :views '(1)))
     (finish-frame session (make-cursor :view 1 :x 5 :y 0 :shape shape))))
 
+(defun encode (message &optional (state (codec:make-codec-state)))
+  (codec:encode message state (codec:next-seq state)))
+
 (deftest a-frame-is-one-bulk-ending-in-update-display
-  (let ((messages (parsed (codec:encode (sample-frame) (codec:make-codec-state)))))
+  (let ((messages (parsed (encode (sample-frame)))))
     (ok (equal '("make-view" "put" "modeline-put" "move-cursor" "update-display")
                (instruction-methods (bulk-of messages)))
         "views-stacked has no equivalent and is left out")))
 
 (deftest a-put-carries-lem-servers-attribute
-  (let* ((wire (text (car (last (codec:encode (sample-frame) (codec:make-codec-state))))))
+  (let* ((wire (text (car (last (encode (sample-frame))))))
          (put (elt (bulk-of (list (codec:parse (octets wire)))) 1))
          (attribute (gethash "attribute" (gethash "argument" put))))
     (ok (equal "#AABBCC" (gethash "foreground" attribute)))
@@ -91,8 +94,7 @@
     (add-op session (make-view-created :view 4 :x 1 :y 2 :width 30 :height 8
                                        :kind :floating :border 1
                                        :border-shape :drop-curtain))
-    (let* ((bulk (bulk-of (parsed (codec:encode (finish-frame session nil)
-                                                (codec:make-codec-state)))))
+    (let* ((bulk (bulk-of (parsed (encode (finish-frame session nil)))))
            (view (gethash "argument" (elt bulk 0))))
       (ok (equal "floating" (gethash "kind" view)))
       (ok (equal "drop-curtain" (gethash "border_shape" view)))
@@ -100,8 +102,7 @@
       (ok (= 1 (gethash "border" view))))))
 
 (deftest changed-default-colours-come-before-the-bulk
-  (let ((messages (parsed (codec:encode (sample-frame :defaults (make-defaults :background #x224466))
-                                        (codec:make-codec-state)))))
+  (let ((messages (parsed (encode (sample-frame :defaults (make-defaults :background #x224466))))))
     (ok (equal "update-background" (method-of (first messages))))
     (ok (equal "#224466" (gethash "params" (first messages))))))
 
@@ -109,7 +110,7 @@
   (let ((state (codec:make-codec-state)))
     (flet ((shape-notices (shape)
              (count "update-cursor-shape"
-                    (parsed (codec:encode (sample-frame :shape shape) state))
+                    (parsed (encode (sample-frame :shape shape) state))
                     :key #'method-of :test #'equal)))
       (ok (= 1 (shape-notices :bar)))
       (ok (= 0 (shape-notices :bar)))
@@ -120,13 +121,19 @@
 (deftest the-clipboard-messages-are-lem-servers
   (let ((state (codec:make-codec-state)))
     (ok (equal "set-clipboard-text"
-               (method-of (first (parsed (codec:encode (relay::make-set-clipboard "x") state))))))
+               (method-of (first (parsed (encode (relay::make-set-clipboard "x") state))))))
     (ok (equal "get-clipboard-text"
-               (method-of (first (parsed (codec:encode (relay::make-clipboard-request 7) state))))))
+               (method-of (first (parsed (encode (relay:make-clipboard-request) state))))))
     (let ((reply (second (codec:decode (codec:parse (octets "{\"jsonrpc\":\"2.0\",\"method\":\"got-clipboard-text\",\"params\":{\"text\":\"hi\"}}"))
                                        state))))
       (ok (typep reply 'clipboard-reply))
-      (ok (= 7 (lem-relay/input::clipboard-reply-id reply)) "answering the latest request"))))
+      (ok (= 2 (lem-relay/input::clipboard-reply-reply-to reply))
+          "answering the latest request, message 2"))))
+
+(deftest outgoing-messages-are-numbered-in-order
+  (let ((state (codec:make-codec-state)))
+    (ok (equal '(1 2 3) (list (codec:next-seq state) (codec:next-seq state)
+                              (codec:next-seq state))))))
 
 ;;; Decoding
 

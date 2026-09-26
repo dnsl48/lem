@@ -173,9 +173,10 @@ gone.
    install lives under `.build/`, out of qlot's searcher's way.
    `PROTOC_PREFIX` was tried against an existing install: 7.5s, plugin only.
 2. **Write `relay.proto`** to [0011](adr/0011-a-frame-oriented-protocol.md).
-   Resolve its open questions first: icon glyphs and the mouse shape.
-   Character width is settled by [0012](adr/0012-the-relay-frame-model.md).
-   Record the answers in 0011's follow-up or in a new ADR. Review the schema against 0011 before any code uses it.
+   Its open questions are answered: character width by
+   [0012](adr/0012-the-relay-frame-model.md), icon glyphs and the mouse
+   by [0013](adr/0013-icons-and-mouse-input.md), which also moves click
+   counting into the relay (done, with `*click-interval*`). Review the schema against 0011 before any code uses it.
 3. **`lem-relay/protobuf`.** Add the schema as a `:protobuf-source-file`
    component. Encode the frame model into generated messages,
    interning styles as it goes ([0012](adr/0012-the-relay-frame-model.md)). Use
