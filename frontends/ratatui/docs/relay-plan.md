@@ -52,13 +52,23 @@ as it is.
 **shaped by [0011](adr/0011-a-frame-oriented-protocol.md) from day one**:
 
 - frames as a unit;
-- interned attributes;
+- styles as normalised values;
+- default colours, cursor shape and stacking as state;
 - the cursor as frame state;
 - `Hello`/`Welcome` semantics.
 
 `lem-relay/json` expands that model back into today's messages: it
-de-interns attributes, emits `bulk` with a trailing `update-display`,
-and answers `login` then waits for `redraw`. Phase 1 therefore also
+turns styles into attribute objects, emits `bulk` with a trailing
+`update-display`, and answers `login` then waits for `redraw`. Model
+state with a `lem-server` message maps onto it: the cursor becomes
+`move-cursor` and `update-cursor-shape`, and the default colours
+`update-foreground` / `update-background`. Today's display ignores
+those, which is harmless. `views-stacked` has no equivalent and is not
+emitted. The display-side work of
+[0012](adr/0012-the-relay-frame-model.md) (hardware cursor, default
+colours, fitting runs to `width`, explicit stacking) lands with the
+display rewrite in phase 2, so in phase 1 the Rust side stays
+untouched. Phase 1 therefore also
 proves the model against the acceptance script, and phase 2 becomes a
 codec swap rather than a second redesign. Porting `lem-server` verbatim
 first would be less work now, but we would pay for it again in phase 2.
@@ -67,10 +77,10 @@ first would be less work now, but we would pay for it again in phase 2.
    `lem-relay/json`, packages per `defpackage_rule`, and an empty relay
    mixin. Make `lem-ratatui` depend on it alongside `lem-server` for
    now. It should build and change nothing.
-2. **Frame model and attribute table (`frame.lisp`).** Model a frame,
-   its ops, the session-scoped attribute interning and the cursor
-   state. Add Rove tests: the same attribute interns to the same id,
-   and an empty frame is detected as empty.
+2. **Frame model (`frame.lisp`),** per [0012](adr/0012-the-relay-frame-model.md):
+   inline styles, ops, the cursor and default colours as frame state,
+   stacking, and suppression in the session. Pin each rule with a Rove
+   test.
 3. **Port the drawing (`draw.lisp`).** Bring across `draw-object` for
    every drawing-object class in `src/display/physical-line.lisp`,
    including `set-last-print-cursor`. Add a catch-all method that logs
@@ -134,19 +144,23 @@ gone.
    README: a C++17 compiler, CMake, zlib. **No change to the root
    `qlfile`.**
 2. **Write `relay.proto`** to [0011](adr/0011-a-frame-oriented-protocol.md).
-   Resolve its open questions first: who owns character width, icon
-   glyphs, the mouse shape. Record the answers in 0011's follow-up or in
-   a new ADR. Review the schema against 0011 before any code uses it.
+   Resolve its open questions first: icon glyphs and the mouse shape.
+   Character width is settled by [0012](adr/0012-the-relay-frame-model.md).
+   Record the answers in 0011's follow-up or in a new ADR. Review the schema against 0011 before any code uses it.
 3. **`lem-relay/protobuf`.** Add the schema as a `:protobuf-source-file`
-   component. Encode the frame model into generated messages. Use
+   component. Encode the frame model into generated messages,
+   interning styles as it goes ([0012](adr/0012-the-relay-frame-model.md)). Use
    varint length-delimited framing. Implement the `Hello`/`Welcome`/`Exit`
    handshake. The frame model should not need to change; if it does,
    phase 1 got the model wrong, so fix it there.
 4. **`lem-protocol` rewrite.** Its `build.rs` uses `protox` and `prost-build`.
    Framing uses `decode_length_delimited`. Remove `serde` and `serde_json`.
    Then move `lem-ratatui` (`views.rs`, `paint.rs`, `input.rs`,
-   `transport.rs`) onto the generated types. The interned attribute
-   table lives display-side.
+   `transport.rs`) onto the generated types. The interned style table
+   lives display-side. Implement [0012](adr/0012-the-relay-frame-model.md)'s
+   display half: the hardware cursor with its shape and visibility,
+   default colours, fitting each run to its `width`, and compositing
+   in `views-stacked` order.
 5. **Cross-language golden tests.** Lisp writes fixture frames, in
    binary plus text format for review, and a Rust test decodes them.
    Rust writes fixture inputs and a Rove test decodes them. This
