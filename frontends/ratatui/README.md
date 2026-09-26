@@ -154,6 +154,13 @@ file just as `lem README.md` would. `LEM_RATATUI_LISP` picks the Lisp
 image and `LEM_RATATUI_TERMINAL` the display binary; `make dist`'s binary
 falls back to the ones embedded in it.
 
+At startup the display asks the terminal for its default colours
+(OSC 10/11, through `terminal-colorsaurus`) and passes them on in
+`Hello`: Lem judges light or dark mode by them for any theme that does
+not choose one, and falls back to them for attributes without colours.
+A terminal that does not support the query answers the DA1 request sent
+with it, so nothing waits; the relay logs what it got, or `unknown`.
+
 Set `LEM_RATATUI_DEBUG=1` to turn off frame suppression, so every
 frame and modeline Lem draws is sent (ADR 0012), and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
@@ -273,7 +280,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run
+python3 scripts/acceptance.py      # needs `make` to have run; 10 checks
 ```
 
 ## Next steps
@@ -292,9 +299,11 @@ Nothing here is required for the PoC; each is its own piece of work.
   rendered in the wrong row for six tasks because acceptance only checked
   that its text was present. Replaying the escape stream into a virtual
   screen and reading it row by row catches what substring checks cannot.
-- **Terminal colour detection.** `Hello` can carry the terminal's own
-  default colours, for Lem's light/dark choice before a theme sets its
-  own; the display does not query them yet (OSC 10/11).
+- **Light terminals with the default theme.** The display tells Lem the
+  terminal's own colours, but `lem-default` pins
+  `:display-background-mode :dark` (`src/ext/themes.lisp:40`), so on a
+  light terminal it still picks dark-mode colours. That is Lem's theme
+  to change, upstream.
 
 ## Keys and mouse
 

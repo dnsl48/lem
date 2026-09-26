@@ -119,6 +119,29 @@ check(9, "C-x C-b lists buffers without crashing",
       "no backtrace, header present")
 s.kill()
 
+# --- 10: the terminal's own colours reach Lem ----------------------------
+# The display asks with OSC 10/11 before taking over the terminal, and the
+# relay logs what Hello carried. A terminal that answers only DA1 must
+# cost no wait: the display then knows at once that colours are not coming.
+def logged_colours():
+    log = os.path.join(os.environ.get("LEM_HOME", "/tmp/lem-scratch/"), "debug.log")
+    try:
+        lines = [l for l in open(log, errors="replace") if "terminal colours" in l]
+    except FileNotFoundError:
+        return ""
+    return lines[-1].strip() if lines else ""
+
+s = Session(colors=("dddd/dddd/dddd", "fafa/fafa/fafa")); s.pump(8)
+answered = logged_colours()
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()
+s = Session(); s.pump(3)
+silent = logged_colours()
+first_frame = "Welcome to Lem" in s.plain()
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()
+check(10, "the terminal's colours reach Lem, and their absence costs no wait",
+      "#DDDDDD on #FAFAFA" in answered and "unknown on unknown" in silent and first_frame,
+      f"answered: {answered[-24:]!r}; silent: {silent[-24:]!r}; first frame within 3s: {first_frame}")
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")

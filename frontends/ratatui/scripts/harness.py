@@ -11,7 +11,14 @@ LISP = f"{REPO}/frontends/ratatui/dist/lem-ratatui-lisp"
 ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/", TERM="xterm-256color", LEM_RATATUI_LISP=LISP)
 
 class Session:
-    def __init__(self, cols=100, rows=30):
+    """The launcher in a pty, answering what a terminal answers.
+
+    DA1 (`ESC [ c`) is always answered, as every terminal does. With
+    `colors=(fg, bg)`, as "rrrr/gggg/bbbb" hex, OSC 10 and 11 are too:
+    that is how the display learns the terminal's colours (colors.rs).
+    """
+    def __init__(self, cols=100, rows=30, colors=None):
+        self.colors = colors
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.execve(BIN, [BIN], ENV)
@@ -30,6 +37,18 @@ class Session:
                 except OSError: return
                 if not c: return
                 self.out += c
+                self.answer(c)
+    def answer(self, chunk):
+        replies = []
+        if self.colors:
+            if b"\x1b]10;?" in chunk:
+                replies.append(b"\x1b]10;rgb:" + self.colors[0].encode() + b"\x1b\\")
+            if b"\x1b]11;?" in chunk:
+                replies.append(b"\x1b]11;rgb:" + self.colors[1].encode() + b"\x1b\\")
+        if b"\x1b[c" in chunk:
+            replies.append(b"\x1b[?62;22c")
+        for reply in replies:
+            os.write(self.fd, reply)
     def send(self, items, delay=0.12):
         for it in items:
             os.write(self.fd, it if isinstance(it, bytes) else it.encode())

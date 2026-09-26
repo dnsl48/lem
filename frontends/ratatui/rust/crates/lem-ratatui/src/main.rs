@@ -7,6 +7,7 @@
 //! `lem-ratatui-launcher`'s job, not this one's.
 
 mod clipboard;
+mod colors;
 #[cfg(test)]
 mod golden;
 mod input;
@@ -58,6 +59,10 @@ fn report(frames: usize, metrics: &metrics::Frames) {
 
 fn main() -> Result<()> {
     let started = Instant::now();
+
+    // Asked before the terminal is taken over and before crossterm reads
+    // input, which would swallow the reply as keystrokes.
+    let colors = colors::query();
 
     // Bound for the whole run: dropping it restores the terminal, so it
     // must outlive the draw loop. Matched by reference — consuming it here
@@ -111,8 +116,8 @@ fn main() -> Result<()> {
         session_id: session.to_string(),
         width: u32::from(width),
         height: u32::from(height),
-        foreground: None,
-        background: None,
+        foreground: colors.foreground,
+        background: colors.background,
     }))?;
 
     let mut frames = 0usize;
