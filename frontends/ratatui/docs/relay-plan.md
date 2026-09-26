@@ -124,6 +124,28 @@ first would be less work now, but we would pay for it again in phase 2.
   639,265 B came from a manual run before the launcher refactor, so it
   is not comparable.
 
+**Phase 1 is done** (September 2026). The frontend runs on `lem-relay`,
+with no `lem-server`, no `jsonrpc` in our code, and no Lem internals.
+
+- Acceptance passes 9/9 and `cargo test` passes, including
+  `relay_fixture.rs`, which decodes the relay's real output
+  (`scripts/capture-relay-json.lisp`) with the display's own types.
+- The workload moved from 186 frames / 315,475 B to 190 / 265,007 B
+  (medians of five). Bytes fell 16%. The extra frames are cursor-only:
+  with per-view cursor memory the median is 177. Phase 2's hardware
+  cursor needs them, so the single-cursor rule of ADR 0012 stays.
+- Where step 7 differed from the list above:
+  - `lisp/transport.lisp` was trimmed, not deleted: the stream hygiene
+    (stdout kept for the wire, the debugger off, the backtrace watchdog)
+    belongs to the process, not to the `lem-server` runner it also held.
+    Its streams are now octet streams.
+  - `lem-ratatui` now depends on `lem/extensions` itself. `lem-server` had
+    been bringing in every mode and extension.
+  - `lem-server`'s start-up hook also switched the frame multiplexer off.
+    That is kept, through the exported `toggle-frame-multiplexer`,
+    because today's display would composite a stale virtual frame over
+    the live one.
+
 ## Phase 2 — `lem-relay/protobuf`
 
 The goal is the redesigned protocol, generated on both sides, with JSON
@@ -160,7 +182,9 @@ gone.
    lives display-side. Implement [0012](adr/0012-the-relay-frame-model.md)'s
    display half: the hardware cursor with its shape and visibility,
    default colours, fitting each run to its `width`, and compositing
-   in `views-stacked` order.
+   in `views-stacked` order. Then remove `keep-frame-multiplexer-off`
+   from `lisp/main.lisp`, so the frame multiplexer works as it does in
+   ncurses.
 5. **Cross-language golden tests.** Lisp writes fixture frames, in
    binary plus text format for review, and a Rust test decodes them.
    Rust writes fixture inputs and a Rove test decodes them. This

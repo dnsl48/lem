@@ -1,21 +1,24 @@
 # lem-ratatui
 
-A terminal frontend for Lem built on `crossterm`, reusing the JSON-RPC
-display protocol that already drives the browser and webview frontends.
+A terminal frontend for Lem built on `crossterm`. Lem's side is
+`lem-relay`, our own implementation of the `lem-if` protocol, which today
+speaks the JSON display protocol the browser frontend uses and is moving
+to a protobuf protocol of its own (see [`docs/relay-plan.md`](docs/relay-plan.md)).
 
 > **Status: working PoC.** Opens files, edits them, renders syntax
 > colours, reflows on resize and leaves the terminal clean on exit — all
 > the acceptance checks from [`docs/poc-plan.md`](docs/poc-plan.md) pass.
-> Single window only: no popups, mouse, clipboard or images. See
-> **Known gaps** below for what is deliberately absent.
+> Splits, popups and the clipboard work; the mouse and images do not.
+> See **Next steps** and **Known gaps** below.
 
 ## Shape
 
 Two halves, split by toolchain rather than by role:
 
 ```
-lisp/     implements lem-if:* by inheriting lem-server:jsonrpc,
-          overriding only the capability flags a terminal changes
+relay/    lem-relay: every lem-if:* method, building frames from what
+          Lem draws, and the codec that puts them on the wire
+lisp/     the ratatui implementation class and the process entry point
 rust/     the launcher, which starts both halves and connects them, and
           the display, which owns the terminal: paints protocol frames
           into a cell buffer, sends key and mouse events back
@@ -36,7 +39,7 @@ so it must not be a TTY; the display's does too, so it draws on
                ▼                               ▼
 ┌──────────────────────────┐  frames  ┌─────────────────┐
 │ lem --interface RATATUI  │ ───────► │  lem-ratatui    │
-│ (stdio JSON-RPC)         │ ◄─────── │  (owns the TTY) │
+│ (lem-relay over stdio)   │ ◄─────── │  (owns the TTY) │
 └──────────────────────────┘  input   └─────────────────┘
 ```
 
@@ -61,8 +64,21 @@ dist/                        every build output (gitignored): the Lisp
                              image, the dev launcher, the bundled binary
 lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
-  implementation.lisp        the `ratatui' implementation class
-  main.lisp                  entry point: serve JSON-RPC over stdio
+  implementation.lisp        the `ratatui' class: relay + capability flags
+  transport.lisp             stdin/stdout as the wire, everything else muffled
+  main.lisp                  entry point, and lem-if:invoke
+relay/                       lem-relay (ADR 0009, 0012)
+  lem-relay.asd              lem-relay, lem-relay/json, lem-relay/tests
+  frame.lisp                 the frame model; suppression of no-op frames
+  view.lisp, draw.lisp       drawing objects to ops, ported from lem-server
+  relay.lisp                 the lem-if methods
+  input.lisp                 what the display sends, delivered to Lem
+  json/                      today's wire: framing, codec, the event loop
+  tests/                     Rove tests, run by `make test`
+scripts/
+  acceptance.py              the acceptance checks, driven through a pty
+  workload.py                the fixed workload's frames and bytes
+  capture-relay-json.lisp    regenerates lem-protocol's relay fixture
 rust/
   Cargo.toml                 workspace
   crates/
@@ -71,6 +87,7 @@ rust/
     lem-ratatui-launcher/    the OS-facing binary: starts and connects
                              both halves; embeds them for `make dist`
 docs/
+  relay-plan.md              the plan lem-relay is being built to
   protocol-notes.md          what lem-server actually sends, with refs
   adr/                       decisions and the arguments behind them
 ```
@@ -80,7 +97,7 @@ docs/
 ```bash
 make -C frontends/ratatui          # everything + the dist/lem-ratatui-dev script
 make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
-make -C frontends/ratatui test     # Rust half (53 tests)
+make -C frontends/ratatui test     # Rust (70 tests) and lem-relay (77; needs Roswell)
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
 ```
 
@@ -100,8 +117,8 @@ binaries of a development build, which stay in `rust/target/release/`.
 The script `dist/lem-ratatui-dev` runs the launcher from there against the
 image beside it, so it can be symlinked onto `PATH`; the launcher finds
 the display beside itself. The Lisp image is rebuilt only when a
-Lisp source under `src/`, `extensions/`, `frontends/server/` or this
-frontend changes; `make -B` forces it.
+Lisp source under `src/`, `extensions/` or this frontend changes;
+`make -B` forces it.
 
 By hand, from the repo root:
 
@@ -119,9 +136,11 @@ file just as `lem README.md` would. `LEM_RATATUI_LISP` picks the Lisp
 image and `LEM_RATATUI_TERMINAL` the display binary; `make dist`'s binary
 falls back to the ones embedded in it.
 
-Set `LEM_RATATUI_DEBUG=1` for transport logging on stderr, and
+Set `LEM_RATATUI_DEBUG=1` to turn off frame suppression, so every
+frame and modeline Lem draws is sent (ADR 0012), and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
-seconds when the editor appears stuck. Lem's stderr goes to
+seconds when the editor appears stuck. The relay's own warnings go to
+Lem's log, `<lem-home>/debug.log`. Lem's stderr goes to
 `/tmp/lem-ratatui.log`; if Lem dies or exits non-zero the launcher says
 so, names that log, and exits non-zero.
 
@@ -209,19 +228,31 @@ Lem is quiet when idle. One keystroke producing a dozen frames is the
 cost worth attacking, and `render-line-on-modeline` repainting the whole
 modeline unconditionally every frame was a large part of it.
 
-Two optimisations live in `lisp/`, both specialising on our own
-implementation class — no change to `lem-server`, no patching:
+Two rules keep that down, and both belong to the relay's frame model
+([`docs/adr/0012`](docs/adr/0012-the-relay-frame-model.md)), below any
+codec:
 
-- `modeline.lisp` sends the modeline only when it differs from the last
-  one sent. `lem-server` repaints it in full every frame with no caching.
-- `frame.lisp` drops a frame that changes nothing. Most frames were
-  `clear-eob` re-blanking an already-blank region, which `redraw-lines`
-  emits on every redraw where the buffer does not fill the window.
+- a modeline is sent only when it differs from the last one sent for its
+  view; `lem-server` repaints it in full every frame;
+- a frame that changes nothing is not sent. Most were `clear-eob`
+  re-blanking an already-blank region, which `redraw-lines` emits on
+  every redraw where the buffer does not fill the window.
 
-| fixed workload | baseline | both |
+Before them, on `lem-server`, a fixed workload took 535 frames and
+1,635,547 bytes; with them, 130 and 639,265 (−76%, −61%). That workload
+is now scripted (`scripts/workload.py`, five runs, median). Moving from
+`lem-server` to `lem-relay` changed it as follows:
+
+| fixed workload | `lem-server` + our overrides | `lem-relay/json` |
 |---|---|---|
-| frames | 535 | **130** (−76%) |
-| total bytes | 1,635,547 | **639,265** (−61%) |
+| frames | 186 (176–189) | 190 (186–192) |
+| total bytes | 315,475 | **265,007** (−16%) |
+
+The extra frames are cursor-only: the relay remembers one last cursor,
+not one per view, so the cursor coming back to a position it held in
+another view is sent. Restoring per-view memory brings the median back to
+177. Those frames are needed once the display moves the terminal's own
+cursor (ADR 0012), so the rule stays.
 
 ## Acceptance
 
@@ -233,22 +264,26 @@ python3 scripts/acceptance.py      # needs `make` to have run
 
 Nothing here is required for the PoC; each is its own piece of work.
 
-- **Reconsider ownership of the Lisp half** —
-  [`docs/adr/0006`](docs/adr/0006-stay-on-lem-server-for-now.md) names
-  PoC completion as an explicit trigger to revisit.
-- **Report the three jsonrpc stdio defects upstream**, and the two
-  `lem-server` handshake traps.
-- **Mouse, images, popup menus** — stubbed `lem-if` methods. Mouse
-  capture being off means terminal-native selection still works.
-- **`update-cursor-shape`** — no bar or underline cursor styles.
-- **No tabbar.** Lem's is html-only; a terminal-native one would have to
-  be written, and would be a feature rather than a port.
+- **Phase 2 of [`docs/relay-plan.md`](docs/relay-plan.md)**: the
+  protobuf protocol, and the display half of ADR 0012 (the terminal's own
+  cursor with its shape, theme colours, stacking order).
+- **Report the jsonrpc stdio defects upstream** (protocol-notes section
+  13). We no longer depend on them, but `lem-server --mode stdio` does.
+- **Mouse and images.** The relay delivers mouse input, but the display
+  does not capture the mouse yet (so terminal-native selection still
+  works), and a terminal draws no images.
+- **No tabbar.** Lem's lives in `lem-server` and is html-only, so it is
+  not loaded here; a terminal-native one would be a feature, not a port.
+- **The frame multiplexer is off** until the display composites by
+  `views-stacked`: switching back to an earlier virtual frame would show
+  the wrong one (`lisp/main.lisp`).
 - **Find more geometry bugs by reconstructing the screen.** The modeline
   rendered in the wrong row for six tasks because acceptance only checked
   that its text was present. Replaying the escape stream into a virtual
   screen and reading it row by row catches what substring checks cannot.
-- **Cursor shape and position** — `move-cursor` is currently ignored; the
-  cursor renders only as Lem's own reverse-video cell.
+- **Cursor shape and position**: the relay sends both, but the display
+  ignores them until phase 2; the cursor renders as Lem's own painted
+  cell.
 
 ## Keys
 
@@ -265,18 +300,10 @@ and this would need revisiting.
 ## Tabbar
 
 `lem-server` enables a tabbar after init, implemented as an **html**
-header window. A terminal cannot paint html, so it would take two rows
-off the top of every buffer and show nothing in them. It is therefore off
-by default here:
-
-```lisp
-(setf lem/tabbar:*enable-tabbar-on-startup* nil)   ; done for you in lisp/main.lisp
-```
-
-`*after-init-hook*` runs after your init file, so setting it back to `T`
-there still works — it just renders nothing until a terminal-native
-tabbar exists. Compositing still skips html views, since an `html-buffer`
-can appear by other routes.
+header window, which a terminal cannot paint. It came with `lem-server`,
+so since the move to `lem-relay` it is simply not loaded. Setting
+`lem/tabbar:*enable-tabbar-on-startup*` in an init file is harmless and
+does nothing here.
 
 ## An upstream bug worth reporting
 
@@ -306,25 +333,11 @@ is lost visually: an attribute naming an underline colour still renders
 one, because the display half maps `Underline::Color` regardless of the
 flag. The flag has exactly one call site in Lem, and it is the crash.
 
-## Known gaps in the scaffold
+## Known gaps
 
-- `lisp/main.lisp` reaches into `lem-server::` internals because the
-  exported `run-stdio-server` hardcodes `--interface JSONRPC`. Teaching it
-  an `:interface` argument is a small upstream change worth proposing.
-- `:underline-color-support t` is set deliberately but is unverified
-  end-to-end; it needs real terminal-capability detection.
-- `*standard-output*` is not yet muffled, and stdout is the wire under
-  `--mode=stdio`. A stray `format` corrupts the frame stream; the
-  launcher must also redirect Lem's stderr to a log file. See
-  [`docs/adr/0005`](docs/adr/0005-stdio-as-the-default-transport.md).
-- No protocol version exchange at `login`. Two separately installed
-  binaries can drift; needed before this ships to users, not for the PoC.
-- `lisp/jsonrpc-stdio-fixes.lisp` works around four defects in jsonrpc's
-  stdio server transport, one of which (`lem-server`'s own
-  `jsonrpc-stdio-patch.lisp` referencing three undefined functions) is a
-  live bug in the tree. All four deserve upstream reports; see
-  [`docs/protocol-notes.md`](docs/protocol-notes.md) section 13.
-- The display half must send non-nil `foreground`/`background` in `login`,
-  or the editor silently stops emitting. That is a robustness bug in
-  `lem-server` — the slots have no `:initform` — that we work around
-  rather than fix. Section 11 of the protocol notes has the detail.
+- `:underline-color-support` is off (see above) and needs real
+  terminal-capability detection before it could be turned on.
+- No protocol version exchange at `login`. The launcher ships both halves
+  together, so they cannot drift today; phase 2's `Hello` carries one.
+- A clipboard reply answers the latest request: today's wire has no
+  request ids. Phase 2's protocol does.

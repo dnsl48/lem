@@ -1,16 +1,13 @@
 (defsystem "lem-ratatui"
-  :description "Terminal frontend driving a Rust/Ratatui display process over the lem-server JSON-RPC protocol."
-  :depends-on ("lem-server"
+  :description "Terminal frontend: Lem relayed by lem-relay to a Rust/Ratatui display process."
+  :depends-on ("lem/core"
+               ;; As lem-ncurses: the modes and extensions. lem-server used
+               ;; to bring these in; nothing else here does.
+               (:feature (:not :lem-minimal-build) "lem/extensions")
                "lem-relay"
-               "jsonrpc"
-               "jsonrpc/transport/stdio"
-               "babel"
-               "yason")
+               "lem-relay/json")
   :serial t
   :pathname "lisp/"
   :components ((:file "implementation")
                (:file "transport")
-               (:file "jsonrpc-stdio-fixes")
-               (:file "modeline")
-               (:file "frame")
                (:file "main")))

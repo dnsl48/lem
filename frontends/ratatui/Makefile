@@ -27,7 +27,7 @@ QLOT_SETUP := $(ROOT)/.qlot/setup.lisp
 # The Lisp half is a saved image, so any Lisp source that ends up in it
 # must trigger a rebuild, not just this frontend's own files.
 LISP_SOURCES := $(HERE)/build.lisp $(HERE)/lem-ratatui.asd \
-	$(shell find $(HERE)/lisp $(HERE)/relay $(ROOT)/src $(ROOT)/extensions $(ROOT)/frontends/server \
+	$(shell find $(HERE)/lisp $(HERE)/relay $(ROOT)/src $(ROOT)/extensions \
 		-name '*.lisp' -o -name '*.asd')
 
 .PHONY: all lisp rust dist run test test-rust test-lisp clean
