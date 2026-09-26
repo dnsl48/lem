@@ -176,7 +176,14 @@ gone.
    Its open questions are answered: character width by
    [0012](adr/0012-the-relay-frame-model.md), icon glyphs and the mouse
    by [0013](adr/0013-icons-and-mouse-input.md), which also moves click
-   counting into the relay (done, with `*click-interval*`). Review the schema against 0011 before any code uses it.
+   counting into the relay (done, with `*click-interval*`).
+
+   *Done:* `proto/lem/relay/v1/relay.proto`, reviewed, with
+   [0014](adr/0014-the-display-describes-keys.md) moving key naming into
+   the relay. `protoc`, `protox`/`prost` and cl-protobufs all compile
+   it, and both envelopes round-trip in each language. The root
+   `.gitignore` ignores anything named `lem`, so the frontend's own
+   re-includes `proto/lem/`. Review the schema against 0011 before any code uses it.
 3. **`lem-relay/protobuf`.** Add the schema as a `:protobuf-source-file`
    component. Encode the frame model into generated messages,
    interning styles as it goes ([0012](adr/0012-the-relay-frame-model.md)). Use

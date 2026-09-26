@@ -1,0 +1,397 @@
+// The protocol between lem-relay (the editor side) and a display.
+//
+// Reviewed September 2026 (relay-plan.md, phase 2 step 2).
+//
+// Decisions behind it, in frontends/ratatui/docs/adr/:
+//   0011  a frame-oriented protocol designed for a terminal
+//   0012  the relay's frame model: what a frame holds
+//   0013  icons, mouse, clicks; every message's identity and time
+//   0014  the display describes keys; the relay names them
+//
+// Transport: the launcher's pipes, stdio (ADR 0005). Each message is one
+// ToDisplay or ToEditor, framed with protobuf's standard length-delimited
+// format: a varint byte length, then the message (prost's
+// encode_length_delimited / decode_length_delimited).
+//
+// Evolution: never renumber or reuse a field; `reserved` what is removed.
+// An incompatible change is package lem.relay.v2, not an edit to v1.
+//
+// Units: positions and sizes are character cells, 0-based; there are no
+// pixels anywhere. Colours are packed 0xRRGGBB in a uint32, and an absent
+// colour means "the default" (see Defaults).
+
+syntax = "proto3";
+
+package lem.relay.v1;
+
+// ---------------------------------------------------------------------------
+// Envelopes
+
+// Everything the relay sends.
+message ToDisplay {
+  // This message's number: 1 for the relay's first in the session, one more
+  // for each after, in wire order. With Welcome.session_id it identifies
+  // the message anywhere (ADR 0013).
+  uint64 seq = 1;
+  // When the relay produced it: microseconds on the relay's monotonic clock
+  // since the relay started. Compared only with other relay times.
+  uint64 time_us = 2;
+
+  oneof message {
+    Welcome welcome = 3;
+    Frame frame = 4;
+    ClipboardRequest clipboard_request = 5;
+    SetClipboard set_clipboard = 6;
+    Exit exit = 7;
+  }
+}
+
+// Everything the display sends.
+message ToEditor {
+  // The display's own numbering, as ToDisplay.seq.
+  uint64 seq = 1;
+  // When the display saw it: microseconds on the display's monotonic clock
+  // since the display started. The relay counts clicks by it.
+  uint64 time_us = 2;
+
+  oneof message {
+    Hello hello = 3;
+    Key key = 4;
+    Abort abort = 5;
+    Paste paste = 6;
+    Mouse mouse = 7;
+    Resize resize = 8;
+    ClipboardReply clipboard_reply = 9;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handshake (ADR 0011). The display speaks first; the relay answers Welcome,
+// then its first Frame. Nothing is required that fails silently when absent.
+
+message Hello {
+  // Revision of this v1 schema the display was built against. Raised for
+  // additions the other side may want to know about; an incompatible change
+  // is a new package instead.
+  uint32 protocol_version = 1;
+  // A UUIDv7 in its canonical text form, made by the display, one per
+  // session. Both sides put it on their log lines.
+  string session_id = 2;
+  // The screen, in cells.
+  uint32 width = 3;
+  uint32 height = 4;
+  // The terminal's own default colours, if the display could find them out.
+  // Lem judges light or dark theme mode by them until a theme sets its own.
+  optional uint32 foreground = 5;
+  optional uint32 background = 6;
+}
+
+message Welcome {
+  // The relay's revision of this schema.
+  uint32 protocol_version = 1;
+  // Hello.session_id, echoed.
+  string session_id = 2;
+}
+
+// The editor is going away, or will not talk to this display. The relay
+// sends it instead of going quiet, e.g. on a protocol_version it cannot
+// serve. The display restores the terminal and exits.
+message Exit {
+  // Empty for a normal exit (C-x C-c); otherwise why, for a human.
+  string reason = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Frames (ADR 0012)
+
+// One display update: everything since the previous frame, then the cursor.
+// A frame that would change nothing on screen is never sent.
+message Frame {
+  // The seq of the last ToEditor the relay had handed to Lem when it closed
+  // this frame: what the frame can reflect. Absent before any input. It
+  // means delivered to Lem's queue, not processed (ADR 0013).
+  optional uint64 input_seq = 1;
+  // Styles used for the first time on the wire in this frame. Ids are
+  // stable for the session; the display keeps a table.
+  repeated Style styles = 2;
+  repeated Op ops = 3;
+  // The primary cursor. Absent when the current window has no view.
+  optional Cursor cursor = 4;
+  // Present in the first frame, and in any frame where they changed.
+  optional Defaults defaults = 5;
+}
+
+// The colours Lem draws with when a style names none: the theme's, once a
+// theme sets them. Absent here means the terminal's own.
+message Defaults {
+  optional uint32 foreground = 1;
+  optional uint32 background = 2;
+}
+
+// A Lem attribute reduced to what the display shows. Style id 0 is never
+// defined: it means default colours and no attributes.
+message Style {
+  uint32 id = 1;
+  optional uint32 foreground = 2;
+  optional uint32 background = 3;
+  bool bold = 4;
+  // Swap foreground and background, resolving absent colours first.
+  bool reverse = 5;
+  bool underline = 6;
+  // The underline's own colour; absent means the foreground's.
+  optional uint32 underline_color = 7;
+  // This cell is a cursor: the primary cursor's cell, or one of several
+  // with multiple cursors. The display paints it as Lem styles it.
+  bool cursor = 8;
+}
+
+message Cursor {
+  uint32 view = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+  // The display moves the terminal's own cursor here, shaped and shown or
+  // hidden accordingly, over the cell painted with a cursor style.
+  bool hidden = 4;
+  CursorShape shape = 5;
+}
+
+enum CursorShape {
+  CURSOR_SHAPE_UNSPECIFIED = 0;
+  CURSOR_SHAPE_BOX = 1;
+  CURSOR_SHAPE_BAR = 2;
+  CURSOR_SHAPE_UNDERLINE = 3;
+}
+
+message Op {
+  oneof op {
+    ViewCreated view_created = 1;
+    ViewDeleted view_deleted = 2;
+    ViewMoved view_moved = 3;
+    ViewResized view_resized = 4;
+    ViewCleared view_cleared = 5;
+    ViewsStacked views_stacked = 6;
+    Put put = 7;
+    LineCleared line_cleared = 8;
+    RestCleared rest_cleared = 9;
+    ModelinePainted modeline_painted = 10;
+  }
+}
+
+// A view is the display's buffer for one Lem window, placed on the screen.
+message ViewCreated {
+  uint32 view = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+  ViewKind kind = 6;
+  // A modeline row below the view's height.
+  bool modeline = 7;
+  // A floating window's border, in cells outside the view; 0 for none.
+  uint32 border = 8;
+  BorderShape border_shape = 9;
+}
+
+enum ViewKind {
+  VIEW_KIND_UNSPECIFIED = 0;
+  VIEW_KIND_TILE = 1;
+  VIEW_KIND_HEADER = 2;
+  VIEW_KIND_FLOATING = 3;
+}
+
+enum BorderShape {
+  BORDER_SHAPE_NONE = 0;
+  BORDER_SHAPE_DROP_CURTAIN = 1;
+  BORDER_SHAPE_LEFT_BORDER = 2;
+}
+
+message ViewDeleted {
+  uint32 view = 1;
+}
+
+message ViewMoved {
+  uint32 view = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+}
+
+// The view's contents are discarded: Lem repaints a resized view in full.
+message ViewResized {
+  uint32 view = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+message ViewCleared {
+  uint32 view = 1;
+}
+
+// The order views composite in, bottom first; views not listed are not
+// shown. Sent when it changes.
+message ViewsStacked {
+  repeated uint32 views = 1;
+}
+
+// A run of text at a cell of a view.
+message Put {
+  uint32 view = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+  string text = 4;
+  // The cells Lem laid the text out as taking. The display fits the text to
+  // exactly this many, clipping or padding, so that a character whose width
+  // the two sides disagree on cannot shift the rest of the line (ADR 0012).
+  uint32 width = 5;
+  // A Style id; 0 for default colours and no attributes.
+  uint32 style = 6;
+}
+
+message LineCleared {
+  uint32 view = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+}
+
+message RestCleared {
+  uint32 view = 1;
+  uint32 y = 2;
+}
+
+// A view's modeline, whole, as runs in painting order. The first spans the
+// full width, blank, in the modeline's style; the rest are its content,
+// the right-hand part already laid out against the right edge. Sent only
+// when it differs from the last one sent for the view.
+message ModelinePainted {
+  uint32 view = 1;
+  repeated Run runs = 2;
+}
+
+// A Put within a known row.
+message Run {
+  uint32 x = 1;
+  string text = 2;
+  uint32 width = 3;
+  uint32 style = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard. The relay asks for the display's clipboard when Lem yanks, and
+// waits briefly for the answer; the reply names the request by its seq.
+
+message ClipboardRequest {}
+
+message ClipboardReply {
+  // The ClipboardRequest's ToDisplay.seq.
+  uint64 reply_to = 1;
+  // Absent when the display has no clipboard to read.
+  optional string text = 2;
+}
+
+message SetClipboard {
+  string text = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Input (ADR 0011, 0013)
+
+// A key, described neutrally: the display does not need to know how Lem
+// names keys. The relay maps it to Lem's name ("Return", "F5", "Space")
+// and applies Lem's shift rules (meta+shift+a is M-A), so that knowledge
+// lives in one place (ADR 0014).
+//
+// Decoding the terminal correctly is still the display's job: crossterm,
+// for one, reports the control bytes 0x1C-0x1F as Ctrl+4..7 where the
+// terminal meant C-\ C-] C-^ C-_.
+message Key {
+  oneof code {
+    // The character typed, as it arrives: "a", "A", "é", " ".
+    string text = 1;
+    NamedKey named = 2;
+    // F<n>: 0 to 24, as Lem has them.
+    uint32 function = 3;
+  }
+  // Shift+Tab is TAB with MODIFIER_SHIFT.
+  repeated Modifier modifiers = 4;
+}
+
+// Lem's keys that are not characters (src/key.lisp), function keys apart.
+enum NamedKey {
+  NAMED_KEY_UNSPECIFIED = 0;
+  NAMED_KEY_ENTER = 1;
+  NAMED_KEY_TAB = 2;
+  NAMED_KEY_BACKSPACE = 3;
+  NAMED_KEY_ESCAPE = 4;
+  NAMED_KEY_INSERT = 5;
+  NAMED_KEY_DELETE = 6;
+  NAMED_KEY_UP = 7;
+  NAMED_KEY_DOWN = 8;
+  NAMED_KEY_LEFT = 9;
+  NAMED_KEY_RIGHT = 10;
+  NAMED_KEY_HOME = 11;
+  NAMED_KEY_END = 12;
+  NAMED_KEY_PAGE_UP = 13;
+  NAMED_KEY_PAGE_DOWN = 14;
+  NAMED_KEY_CONTEXT_MENU = 15;
+}
+
+enum Modifier {
+  MODIFIER_UNSPECIFIED = 0;
+  MODIFIER_CTRL = 1;
+  MODIFIER_META = 2;
+  MODIFIER_SHIFT = 3;
+  MODIFIER_SUPER = 4;
+}
+
+// Stop what the editor is doing (C-g). Its own message, not a key: a queued
+// key would wait behind the very work it is meant to stop.
+message Abort {}
+
+// Text pasted into the terminal, inserted as the major mode pastes.
+message Paste {
+  string text = 1;
+}
+
+// The screen is now this size, in cells. Lem lays out and repaints.
+message Resize {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+// A mouse event, reported as it happens. Click counts are the relay's to
+// work out, from ToEditor.time_us (ADR 0013).
+message Mouse {
+  uint32 x = 1;
+  uint32 y = 2;
+  oneof action {
+    Press press = 3;
+    Release release = 4;
+    Move move = 5;
+    Wheel wheel = 6;
+  }
+}
+
+message Press {
+  Button button = 1;
+}
+
+message Release {
+  Button button = 1;
+}
+
+// With a button held, a drag.
+message Move {
+  optional Button button = 1;
+}
+
+// In lines; positive is left for dx and up for dy, as Lem reads them.
+message Wheel {
+  sint32 dx = 1;
+  sint32 dy = 2;
+}
+
+enum Button {
+  BUTTON_UNSPECIFIED = 0;
+  BUTTON_LEFT = 1;
+  BUTTON_MIDDLE = 2;
+  BUTTON_RIGHT = 3;
+}
