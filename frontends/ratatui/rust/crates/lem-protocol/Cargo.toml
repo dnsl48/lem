@@ -1,6 +1,6 @@
 [package]
 name = "lem-protocol"
-description = "Types and codec for the lem-server JSON-RPC display protocol."
+description = "Types and framing for the display protocol: lem.relay.v1, and until it retires, the lem-server JSON-RPC protocol."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+prost = "0.14"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+
+[build-dependencies]
+prost-build = "0.14"
+protox = "0.9"
