@@ -3,7 +3,7 @@
   (:export :ratatui))
 (in-package :lem-ratatui/implementation)
 
-(defclass ratatui (lem-server:jsonrpc lem-core:implementation)
+(defclass ratatui (lem-relay/relay:relay lem-core:implementation)
   ()
   (:default-initargs
    :name :ratatui
@@ -41,13 +41,13 @@
    :underline-color-support nil)
   (:documentation "Frontend implementation for the Rust/Ratatui display process.
 
-Inherits the whole `lem-if:*' protocol from `lem-server:jsonrpc' and only
-overrides the capability flags where a terminal differs from a browser.
+Every `lem-if:*' drawing method comes from `lem-relay/relay:relay' (ADR
+0009), and `lem-if:invoke' from lisp/main.lisp. This class sets the
+capability flags, where a terminal differs from a browser.
 
-`lem-core:implementation' is listed as an explicit superclass because
+`lem-core:implementation' is listed as a direct superclass because
 `lem-core:get-default-implementation' selects a frontend by scanning
 `c2mop:class-direct-subclasses' of `implementation' and comparing class
-names against the --interface argument. Inheriting solely through
-`lem-server:jsonrpc' would make this class an indirect subclass and
-therefore invisible to that lookup. `lem-webview:webview' uses the same
-idiom for the same reason."))
+names against the --interface argument. The relay is a mixin, not an
+implementation, for the same reason: it cannot run on its own and must
+not be offered as an interface."))
