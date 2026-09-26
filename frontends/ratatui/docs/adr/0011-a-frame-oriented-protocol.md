@@ -3,6 +3,8 @@
 **Status:** Accepted — September 2026. These are principles; the
 concrete `relay.proto` is written in [phase 2](../relay-plan.md) and
 reviewed against this record.
+**Refined by:** [0012](0012-the-relay-frame-model.md), the frame model:
+it settles character width and moves interning into the phase 2 codec.
 
 ## Context
 
