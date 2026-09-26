@@ -7,7 +7,8 @@ lem-relay/protobuf. ADR 0009, frontends/ratatui/docs/adr/."
   :components ((:file "frame")
                (:file "view")
                (:file "draw")
-               (:file "relay"))
+               (:file "relay")
+               (:file "input"))
   :in-order-to ((test-op (test-op "lem-relay/tests"))))
 
 (defsystem "lem-relay/tests"
@@ -15,5 +16,6 @@ lem-relay/protobuf. ADR 0009, frontends/ratatui/docs/adr/."
   :pathname "tests/"
   :components ((:file "frame")
                (:file "draw")
-               (:file "relay"))
+               (:file "relay")
+               (:file "input"))
   :perform (test-op (o c) (symbol-call :rove '#:run c)))
