@@ -118,6 +118,35 @@ editors have run in one process, as tests do, the two can be different
       (ok (search "hi there" (painted-text frame)))
       (ok (eql (view-created-view popup) (car (last stacked))) "on top"))))
 
+(lem:define-attribute test-italic-attribute
+  (t :foreground "#123456"))
+
+(deftest marking-an-attribute-makes-its-text-italic
+  (with-editor (relay)
+    (redraw)
+    (ok (= 1 (mark-font-styles '((test-italic-attribute :italic :dim)
+                                 (no-such-attribute :italic)))))
+    (let ((put (first (lem-relay/draw:object-puts
+                       (make-instance 'lem-core/display:text-object
+                                      :string "x" :attribute 'test-italic-attribute :type nil)
+                       0 0 (lem-relay/view:make-view :id 1 :width 10 :height 1)))))
+      (ok (style-italic (text-put-style put)))
+      (ok (style-dim (text-put-style put))))))
+
+(deftest a-theme-load-drops-the-marks-so-they-are-reapplied
+  ;; Why lem-ratatui marks from lem:*after-load-theme-hook*: a theme load
+  ;; rebuilds every attribute object from its definition.
+  (with-editor (relay)
+    (mark-font-styles '((test-italic-attribute :italic)))
+    (ok (lem:attribute-value (lem:ensure-attribute 'test-italic-attribute) :italic))
+    (lem:load-theme "lem-default" nil)
+    (ng (lem:attribute-value (lem:ensure-attribute 'test-italic-attribute) :italic))
+    (mark-font-styles '((test-italic-attribute :italic)))
+    (ok (lem:attribute-value (lem:ensure-attribute 'test-italic-attribute) :italic))))
+
+(deftest only-font-styles-can-be-marked
+  (ok (signals (mark-font-styles '((test-italic-attribute :bold))))))
+
 ;;; Frame state
 
 (deftest a-theme-background-reaches-lem-and-the-display

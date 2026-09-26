@@ -143,6 +143,12 @@ message Style {
   // This cell is a cursor: the primary cursor's cell, or one of several
   // with multiple cursors. The display paints it as Lem styles it.
   bool cursor = 8;
+  // Font styles, from the attribute's :italic, :strikethrough and :dim
+  // (ADR 0015). Lem's attribute has no slots for them; they ride in its
+  // property list.
+  bool italic = 9;
+  bool strikethrough = 10;
+  bool dim = 11;
 }
 
 message Cursor {

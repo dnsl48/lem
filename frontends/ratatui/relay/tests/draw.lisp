@@ -124,6 +124,14 @@ on T, so this proves the same thing."))
       (ok (= 1 (length ops)))
       (ok (= 3 (rest-cleared-y (first ops)))))))
 
+(deftest a-popup-background-keeps-font-styles
+  (let ((lem-if:*background-color-of-drawing-window* "#202020"))
+    (let ((style (text-put-style (first (object-puts
+                                         (text "a" (lem:make-attribute :plist '(:italic t)))
+                                         0 0 (a-view))))))
+      (ok (eql #x202020 (style-background style)))
+      (ok (style-italic style)))))
+
 ;;; Lines and modelines
 
 (deftest a-line-is-cleared-then-drawn-left-to-right
