@@ -28,8 +28,10 @@ be served, having told it why with `Exit'."
                    (lambda (seq)
                      (codec:exit-message seq "Hello carried no protocol_version.")))
     (return-from hello nil))
-  (log:info "lem-relay/protobuf: session ~A, display protocol revision ~D"
-            session-id version)
+  (log:info "lem-relay/protobuf: session ~A, display protocol revision ~D, terminal colours ~A on ~A"
+            session-id version
+            (if foreground (format nil "#~6,'0X" foreground) "unknown")
+            (if background (format nil "#~6,'0X" background) "unknown"))
   (when (and (plusp width) (plusp height))
     (relay:set-display-size relay width height))
   ;; The terminal's own colours: what Lem judges light or dark mode by

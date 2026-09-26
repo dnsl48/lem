@@ -16,7 +16,7 @@ would leave any breakage ambiguous.
 
 ## Invariants for every step
 
-- `python3 frontends/ratatui/scripts/acceptance.py` passes 9/9.
+- `python3 frontends/ratatui/scripts/acceptance.py` passes every check (10 since the terminal-colour check).
 - `C-x C-c` exits 0 with the terminal restored.
 - No new `lem-server::`, `lem-core::` or `lem::` references (the
   `internal_symbol_rule` in `contract.yml`).
