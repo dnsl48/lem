@@ -10,12 +10,13 @@ changes who produces the frames and leaves the bytes the same. Phase 2
 changes the bytes and leaves the producer the same. Doing both at once
 would leave any breakage ambiguous.
 
-**Phase 0, done:** the ADRs above and the
-[protobuf spike](protobuf-spike.md).
+**Phase 0, done:** the ADRs above, the
+[protobuf spike](protobuf-spike.md), and a baseline: 9/9 acceptance,
+`cargo test` green, and the workload scripted (`scripts/workload.py`).
 
 ## Invariants for every step
 
-- `python3 frontends/ratatui/scripts/acceptance.py` passes 8/8.
+- `python3 frontends/ratatui/scripts/acceptance.py` passes 9/9.
 - `C-x C-c` exits 0 with the terminal restored.
 - No new `lem-server::`, `lem-core::` or `lem::` references (the
   `internal_symbol_rule` in `contract.yml`).
@@ -105,9 +106,13 @@ first would be less work now, but we would pay for it again in phase 2.
 - `C-x C-b` still works (the `86106f75` regression);
 - `grep -r "lem-server" frontends/ratatui/lisp frontends/ratatui/relay`
   is empty;
-- the fixed workload from [0003](adr/0003-keep-json-codec-for-now.md)
-  (open a file, type 40 characters, save, quit) is no worse than 130
-  frames / 639,265 bytes.
+- `python3 frontends/ratatui/scripts/workload.py 5` is no worse than
+  the baseline beyond run-to-run spread. The baseline was measured at
+  `9f1a483c` over 5 runs: median 186 frames / 315,475 B (range 176–189
+  frames, 303,729–316,941 B). This is 0003's workload (open a file,
+  type 40 characters, save, quit), now scripted. 0003's own 130 frames /
+  639,265 B came from a manual run before the launcher refactor, so it
+  is not comparable.
 
 ## Phase 2 — `lem-relay/protobuf`
 
@@ -158,8 +163,8 @@ gone.
 - `make dist` produces a working single binary;
 - a fresh clone builds with only `make toolchain && make` beyond the
   documented prerequisites;
-- the fixed workload is measured and recorded in 0011 next to the
-  phase 1 numbers.
+- `workload.py` is measured and recorded in 0011 next to the phase 1
+  numbers.
 
 ## Upstream reports, whenever convenient
 
