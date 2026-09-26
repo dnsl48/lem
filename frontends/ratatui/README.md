@@ -69,12 +69,11 @@ lisp/
   transport.lisp             stdin/stdout as the wire, everything else muffled
   main.lisp                  entry point, and lem-if:invoke
 relay/                       lem-relay (ADR 0009, 0012)
-  lem-relay.asd              lem-relay, lem-relay/json, lem-relay/protobuf, tests
+  lem-relay.asd              lem-relay, lem-relay/protobuf, lem-relay/tests
   frame.lisp                 the frame model; suppression of no-op frames
   view.lisp, draw.lisp       drawing objects to ops, ported from lem-server
   relay.lisp                 the lem-if methods
   input.lisp                 what the display sends, delivered to Lem
-  json/                      today's wire: framing, codec, the event loop
   protobuf/                  lem.relay.v1: framing, codec, the event loop
   tests/                     Rove tests, run by `make test`
 proto/lem/relay/v1/
@@ -85,7 +84,6 @@ proto/fixtures/              golden messages both halves decode, each with
 scripts/
   acceptance.py              the acceptance checks, driven through a pty
   workload.py                the fixed workload's frames and bytes
-  capture-relay-json.lisp    regenerates lem-protocol's JSON relay fixture
   capture-relay-v1.lisp      regenerates proto/fixtures/relay-session.v1.*
 rust/
   Cargo.toml                 workspace
@@ -96,7 +94,8 @@ rust/
                              both halves; embeds them for `make dist`
 docs/
   relay-plan.md              the plan lem-relay is being built to
-  protocol-notes.md          what lem-server actually sends, with refs
+  protocol.md                how lem.relay.v1 behaves: order, guarantees
+  protocol-notes.md          what lem-server sent, before lem-relay (history)
   adr/                       decisions and the arguments behind them
 ```
 
@@ -225,17 +224,13 @@ testing either direction.
 
 ## Performance
 
-One realistic release-build session (open, type, move, resize twice,
-save, quit):
+Encoding and decoding were never the cost. In the PoC, on `lem-server`'s
+JSON, one realistic session decoded in 68 µs a frame, 0.4% of a 16.7 ms
+frame budget ([`docs/adr/0003`](docs/adr/0003-keep-json-codec-for-now.md)).
+Protobuf was chosen for the schema, not for speed
+([`docs/adr/0010`](docs/adr/0010-protobuf-for-schema-and-codec.md)).
 
-```
-960 frames, 3,006,287 B total, avg 3,131 B, max 17,234 B, avg decode 68us
-```
-
-Decoding is 0.4% of a 16.7ms frame budget, which is why
-[`docs/adr/0003`](docs/adr/0003-keep-json-codec-for-now.md) keeps JSON.
-
-The notable number is frame *amplification*, not idle churn:
+The notable number was frame *amplification*, not idle churn:
 
 ```
 idle, clean buffer     ~0.0 frames/sec
@@ -260,18 +255,20 @@ codec:
 Before them, on `lem-server`, a fixed workload took 535 frames and
 1,635,547 bytes; with them, 130 and 639,265 (−76%, −61%). That workload
 is now scripted (`scripts/workload.py`, five runs, median). Moving from
-`lem-server` to `lem-relay` changed it as follows:
+`lem-server` to `lem-relay`, then from JSON to `lem.relay.v1`:
 
-| fixed workload | `lem-server` + our overrides | `lem-relay/json` |
-|---|---|---|
-| frames | 186 (176–189) | 190 (186–192) |
-| total bytes | 315,475 | **265,007** (−16%) |
+| fixed workload | `lem-server` + our overrides | `lem-relay/json` | `lem-relay/protobuf` |
+|---|---|---|---|
+| frames | 186 (176–189) | 190 (186–192) | 175 (170–184) |
+| total bytes | 315,475 | 265,007 (−16%) | **59,069** (−81%) |
 
-The extra frames are cursor-only: the relay remembers one last cursor,
-not one per view, so the cursor coming back to a position it held in
-another view is sent. Restoring per-view memory brings the median back to
-177. Those frames are needed once the display moves the terminal's own
-cursor (ADR 0012), so the rule stays.
+On JSON the relay sent a few more frames than `lem-server`'s overrides:
+cursor-only ones. The relay remembers one last cursor, not one per view,
+so the cursor coming back to where it was in another view is sent; with
+per-view memory the median was 177. The display now moves the terminal's
+own cursor, and needs them. The bytes fall mostly because styles are
+defined once and referred to by id, and because nothing browser-only is
+on the wire.
 
 ## Acceptance
 
