@@ -226,6 +226,18 @@ gone.
    Rust writes fixture inputs and a Rove test decodes them. This
    replaces `frame.jsonl` and catches schema drift that compiles on
    both sides.
+
+   *Done.* Both fixtures live in `proto/fixtures/`, beside the schema,
+   each with a text twin for review:
+   - `relay-session.v1.bin` is written by `scripts/capture-relay-v1.lisp`
+     from the real editor through the relay, and decoded by
+     `lem-protocol/tests/relay_v1_fixture.rs`. That test checks wire
+     order, style definitions, text, stacking and frame state.
+   - `display-inputs.v1.bin` is built by `lem-ratatui`'s own key and
+     mouse conversions (`src/golden.rs`, which fails if they change;
+     `LEM_UPDATE_FIXTURES=1` rewrites it), and decoded by
+     `relay/tests/golden.lisp`. That test checks what Lem receives: key
+     names, modifiers, and a double click from the display's timestamps.
 6. **Retire JSON.** Remove `lem-relay/json` and the `yason` dependency.
    Rewrite [protocol-notes](protocol-notes.md) around the new protocol:
    §11–§14 describe a wire that no longer exists and become history.
