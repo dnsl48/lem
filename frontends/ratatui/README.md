@@ -101,6 +101,17 @@ make -C frontends/ratatui test     # Rust (70 tests) and lem-relay (77; needs Ro
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
 ```
 
+**Prerequisites** beyond SBCL, qlot and Rust: a C++17 compiler, CMake,
+zlib and git. The first build runs `make toolchain`, which builds
+protobuf's `protoc` (v36.2) and cl-protobufs' `protoc-gen-cl-pb` into
+`toolchain/` (about three minutes, once). Every Lisp build puts
+`toolchain/bin` first on `PATH`, because cl-protobufs compiles `.proto`
+files as it loads, its own included. The Rust side needs none of this.
+`PROTOC_PREFIX=/usr/local` uses an installed protobuf instead, headers
+and CMake files included. `make distclean` removes `toolchain/`, and
+`make clean` leaves it. See
+[`docs/adr/0010`](docs/adr/0010-protobuf-for-schema-and-codec.md).
+
 `make dist` embeds the Lisp image and the display binary, zstd-compressed,
 in the launcher (`bundle` feature, ~27 MB against the image's ~125 MB).
 They can't be run from memory — an SBCL executable locates its core via
