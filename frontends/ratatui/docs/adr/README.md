@@ -28,7 +28,8 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | [0008](0008-a-launcher-owns-the-processes.md) | A launcher owns the processes; the display only speaks the protocol | Accepted |
 | [0009](0009-our-own-relay.md) | Our own relay, `lem-relay`, instead of `lem-server` | Accepted |
 | [0010](0010-protobuf-for-schema-and-codec.md) | Protobuf for the schema and the codec | Accepted |
-| [0011](0011-a-frame-oriented-protocol.md) | A frame-oriented protocol designed for a terminal | Accepted (principles; schema in phase 2) |
+| [0011](0011-a-frame-oriented-protocol.md) | A frame-oriented protocol designed for a terminal | Accepted (principles; schema in phase 2); refined by 0012 |
+| [0012](0012-the-relay-frame-model.md) | The relay's frame model | Accepted |
 
 ## Adding one
 
