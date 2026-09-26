@@ -242,6 +242,13 @@ gone.
    Rewrite [protocol-notes](protocol-notes.md) around the new protocol:
    §11–§14 describe a wire that no longer exists and become history.
 
+   *Done.* `lem-relay/json`, `capture-relay-json.lisp`, the JSON half of
+   `lem-protocol` (its types, framing, JSON-RPC envelopes, both `.jsonl`
+   fixtures and their tests) are gone, and with them `yason`, `serde` and
+   `serde_json`. The ADRs cite `protocol-notes.md` by section, so it was
+   not rewritten: it is marked as history, and
+   [`protocol.md`](protocol.md) describes `lem.relay.v1` as it behaves.
+
 **Done when:**
 
 - the invariants hold;
@@ -251,6 +258,21 @@ gone.
   documented prerequisites;
 - `workload.py` is measured and recorded in 0011 next to the phase 1
   numbers.
+
+**Phase 2 is done** (September 2026). The frontend speaks `lem.relay.v1`
+end to end, generated on both sides from one schema, and JSON is gone.
+
+- Acceptance passes 9/9, and the golden fixtures decode in both
+  directions.
+- `make dist` builds the single binary, and it runs from its embedded
+  halves.
+- A clean copy of the tree, with no `.qlot/`, `toolchain/` or build
+  outputs, built with `make toolchain` (2m40s) then `make` (48s), and
+  passed `make test` and acceptance. qlot's and cargo's download caches
+  were warm, so a new machine spends longer fetching, but nothing relied
+  on a working tree's build state.
+- The workload is recorded in [0011](adr/0011-a-frame-oriented-protocol.md):
+  175 frames and 59,069 B, against 315,475 B at the start.
 
 ## Upstream reports, whenever convenient
 

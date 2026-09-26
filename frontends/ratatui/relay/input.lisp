@@ -39,8 +39,9 @@ three a form.")
 ;;; What the display sends (ADR 0011), as Lisp data a codec decodes into.
 
 (defstruct (input (:constructor nil))
-  "What every input has (ADR 0013), each NIL when the wire does not carry
-it, as today's JSON does not:
+  "What every input has (ADR 0013). lem.relay.v1 carries both on every
+message; either is NIL only for an input made in Lisp rather than
+decoded, as tests make them:
 
 TIME  when the display saw it, in microseconds on the display's monotonic
       clock; compared only with other display times.
@@ -179,8 +180,8 @@ clipboard reply, which the editor thread is blocked waiting for.")
                  (lem:receive-mouse-button-down
                   x y x y button
                   ;; When the display saw the press, not when it arrived
-                  ;; (ADR 0013). A wire without timestamps falls back to
-                  ;; arrival, which a local pipe makes nearly the same.
+                  ;; (ADR 0013). An input without one falls back to arrival,
+                  ;; which a local pipe makes nearly the same.
                   (count-click relay button x y
                                (or (input-time input) (now-microseconds))))))
         (:up (when button
