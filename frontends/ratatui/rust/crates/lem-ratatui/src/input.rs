@@ -5,7 +5,9 @@
 //! button at which cell. Lem's key names, its shift rules and click counts
 //! are all the relay's. What stays here is reading the terminal right.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventState, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use lem_protocol::v1::{self, NamedKey, key, mouse};
 
 /// Describe a key event, or `None` for a key the protocol has no word for.
@@ -14,16 +16,8 @@ use lem_protocol::v1::{self, NamedKey, key, mouse};
 /// something else, it would run some other binding.
 pub fn key(event: KeyEvent) -> Option<v1::Key> {
     let code = match event.code {
-        // crossterm decodes the C0 controls 0x1C..0x1F as Ctrl+'4'..'7'
-        // (`c - 0x1C + b'4'` in its unix parser), but the terminal sent
-        // C-\ C-] C-^ C-_, as ASCII and Lem name those bytes; C-_ is
-        // redo, and C-] is abort. Both readings arrive as the same byte,
-        // and the ASCII one is what Lem binds. The kitty keyboard
-        // protocol would tell them apart.
-        KeyCode::Char(digit @ ('4'..='7')) if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            const CONTROLS: [&str; 4] = ["\\", "]", "^", "_"];
-            key::Code::Text(CONTROLS[digit as usize - '4' as usize].into())
-        }
+        // The input parser distinguishes legacy C0 bytes from enhanced
+        // Ctrl+digits. Do not reinterpret either once it is a key event.
         KeyCode::Char(c) => key::Code::Text(c.to_string()),
         KeyCode::Enter => key::Code::Named(NamedKey::Enter as i32),
         KeyCode::Tab | KeyCode::BackTab => key::Code::Named(NamedKey::Tab as i32),
@@ -63,6 +57,7 @@ pub fn key(event: KeyEvent) -> Option<v1::Key> {
     Some(v1::Key {
         code: Some(code),
         modifiers,
+        keypad: event.state.contains(KeyEventState::KEYPAD),
     })
 }
 
@@ -189,16 +184,49 @@ mod tests {
     }
 
     #[test]
-    fn the_c0_controls_keep_their_ascii_meaning() {
-        for (reported, meant) in [('4', "\\"), ('5', "]"), ('6', "^"), ('7', "_")] {
-            let k = described(KeyCode::Char(reported), KeyModifiers::CONTROL);
-            assert_eq!(text(&k), Some(meant), "Ctrl+{reported}");
+    fn control_digits_and_ascii_controls_remain_distinct() {
+        for character in ['4', '5', '6', '7', '\\', ']', '^', '_'] {
+            let k = described(KeyCode::Char(character), KeyModifiers::CONTROL);
+            assert_eq!(text(&k), Some(character.to_string().as_str()));
             assert!(has(&k, v1::Modifier::Ctrl));
         }
-        assert_eq!(
-            text(&described(KeyCode::Char('4'), KeyModifiers::NONE)),
-            Some("4")
-        );
+    }
+
+    #[test]
+    fn keypad_provenance_is_independent_of_code_and_modifiers() {
+        for code in [
+            KeyCode::Char('1'),
+            KeyCode::Char('5'),
+            KeyCode::Char('+'),
+            KeyCode::Char('/'),
+            KeyCode::Enter,
+            KeyCode::Left,
+            KeyCode::Home,
+        ] {
+            for modifiers in [KeyModifiers::NONE, KeyModifiers::CONTROL] {
+                let ordinary = described(code, modifiers);
+                let mut event = KeyEvent::new(code, modifiers);
+                event.state = KeyEventState::KEYPAD;
+                let keypad = key(event).unwrap();
+                assert!(keypad.keypad);
+                assert!(!ordinary.keypad);
+                assert_eq!(keypad.code, ordinary.code);
+                assert_eq!(keypad.modifiers, ordinary.modifiers);
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_and_shifted_control_text_reach_the_relay_unchanged() {
+        for (character, modifiers) in [
+            ('č', KeyModifiers::NONE),
+            ('š', KeyModifiers::NONE),
+            ('g', KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+            ('G', KeyModifiers::CONTROL),
+        ] {
+            let k = described(KeyCode::Char(character), modifiers);
+            assert_eq!(text(&k), Some(character.to_string().as_str()));
+        }
     }
 
     #[test]

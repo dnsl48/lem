@@ -18,7 +18,7 @@
            :key-name))
 (in-package :lem-relay/protobuf/codec)
 
-(defconstant +protocol-version+ 1
+(defconstant +protocol-version+ 2
   "The revision of lem.relay.v1 this codec speaks (relay.proto, `Hello').")
 
 (defparameter *named-keys*
@@ -242,7 +242,17 @@ anything else, now."
                     :meta (and (member :modifier-meta modifiers) t)
                     :shift (and (member :modifier-shift modifiers) t)
                     :super (and (member :modifier-super modifiers) t)
+                    :keypad (pb:key.keypad key)
                     :time time :seq seq)))
+
+(defun terminal-capabilities-from (hello)
+  "Decode Hello's presence separately from its default-false flags."
+  (when (pb:hello.has-capabilities hello)
+    (let ((capabilities (pb:hello.capabilities hello)))
+      (lem-relay/relay:make-terminal-capabilities
+       :keyboard-disambiguation (pb:terminal-capabilities.keyboard-disambiguation capabilities)
+       :alternate-key-reporting (pb:terminal-capabilities.alternate-key-reporting capabilities)
+       :keypad-identity (pb:terminal-capabilities.keypad-identity capabilities)))))
 
 (defun button (value)
   (ecase value
@@ -274,7 +284,7 @@ anything else, now."
 (defun decode (body)
   "What BODY, one serialised `ToEditor', asks for:
 
-  (:hello SEQ PROTOCOL-VERSION SESSION-ID WIDTH HEIGHT FOREGROUND BACKGROUND)
+  (:hello SEQ PROTOCOL-VERSION SESSION-ID WIDTH HEIGHT FOREGROUND BACKGROUND CAPABILITIES)
   (:input INPUT)
   (:ignored)          ; a message this revision does not know"
   (let* ((message (proto:deserialize-from-bytes 'pb:to-editor body))
@@ -289,7 +299,8 @@ anything else, now."
                (pb:hello.width hello)
                (pb:hello.height hello)
                (and (pb:hello.has-foreground hello) (pb:hello.foreground hello))
-               (and (pb:hello.has-background hello) (pb:hello.background hello)))))
+               (and (pb:hello.has-background hello) (pb:hello.background hello))
+               (terminal-capabilities-from hello))))
       (pb:key
        (list :input (key-input-from (pb:to-editor.key message) seq time)))
       (pb:abort

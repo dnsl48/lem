@@ -108,7 +108,7 @@ docs/
 ```bash
 make -C frontends/ratatui          # everything + the dist/lem-ratatui-dev script
 make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
-make -C frontends/ratatui test     # Rust (70 tests) and lem-relay (77; needs Roswell)
+make -C frontends/ratatui test     # Rust and lem-relay suites (Lisp needs Roswell)
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
 ```
 
@@ -355,15 +355,54 @@ them, within `lem-relay/input:*click-interval*` (0.5 s, settable from
 most terminals keep it on **Shift+drag**. Pasting from the terminal
 (bracketed paste) inserts the text as the major mode pastes.
 
-crossterm decodes the C0 controls 0x1C–0x1F as `Ctrl+'4'` through
-`Ctrl+'7'`, but ASCII and Lem both name those bytes `C-\`, `C-]`, `C-^`
-and `C-_`. They are translated back, so `C-\` reaches Lem as `C-\`
-rather than reporting `Key not found: C-4`, and `C-_` runs `redo`.
+**Enhanced keyboard input.** On startup the display queries the controlling
+terminal for the kitty keyboard protocol. When available, it requests
+escape-code disambiguation and alternate-key reporting, then confirms the
+active flags. Detection and confirmation share a one-second deadline.
+Unsupported terminals, failed queries and missing confirmations use legacy
+input. `LEM_RATATUI_KEYBOARD=legacy` skips negotiation.
 
-The two readings are indistinguishable on the wire — a terminal sends
-0x1C for both `Ctrl+4` and `C-\` — so the ASCII one wins because it is
-what Lem binds. Enabling the kitty keyboard protocol would separate them
-and this would need revisiting.
+The confirmed keyboard capabilities travel to the relay in `Hello`.
+`M-x describe-terminal-capabilities` reports them; an older display that
+does not send capabilities is reported as unknown. The capability to report
+keypad identity does not guarantee that every keypad key is distinguishable
+in every terminal or Num Lock state: each key carries its own provenance.
+
+Modified keypad digits and arithmetic keys can be bound separately, for
+example `C-Keypad4` or `C-M-Keypad5`. Ordinary keypad digits still insert
+text, and keypad Enter and navigation retain their usual behaviour.
+Shifted printable chords use Lem's character convention: Ctrl+Shift+G is
+`C-G`, distinct from `C-g`; Alt+Shift+P is `M-P`. For named keys, use
+`Shift-Tab` or `C-Shift-Return`. In Lem key specifications `S-` means Super,
+not Shift. Terminal or desktop shortcuts may still intercept a gesture
+before it reaches Lem.
+
+The Rust workspace carries a narrowly patched crossterm 0.29.0 under
+`rust/vendor/`. Its terminal query writes only to `/dev/tty`, waits within
+the supplied deadline and preserves input queued during detection. It also
+decodes the raw C0 bytes 0x1C–0x1F by their ASCII names, `C-\`, `C-]`,
+`C-^` and `C-_`. Enhanced Ctrl+4 through Ctrl+7 therefore remain distinct
+from those control keys, including when legacy input was queued during
+negotiation. The local patch record documents the upstream source and fixes.
+
+Keyboard flags are restored once on exit or panic, before leaving the
+alternate screen. A terminal that cannot report enhanced keys continues to
+support ordinary Emacs chords; personal configurations should retain those
+as alternatives.
+
+Focused keyboard checks, from this frontend directory:
+
+```sh
+cargo build --manifest-path rust/Cargo.toml -p lem-ratatui
+python3 scripts/keyboard-acceptance.py
+cargo test --manifest-path rust/vendor/crossterm/Cargo.toml --lib
+python3 rust/vendor/crossterm/tests/keyboard_probe_pty.py
+```
+
+These use isolated PTYs and protocol pipes. They verify negotiation,
+fallback, queued keys and restoration without opening Lem or changing a
+personal configuration. Physical gestures still need checking in the
+terminal and keyboard layout in use.
 
 ## Tabbar
 

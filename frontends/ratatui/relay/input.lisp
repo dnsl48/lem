@@ -10,6 +10,7 @@
            :key-input-meta
            :key-input-shift
            :key-input-super
+           :key-input-keypad
            :abort-input
            :make-abort-input
            :paste-input
@@ -36,6 +37,33 @@ The display reports every press as it happens and the relay counts them
 (ADR 0013), since Lem acts on the count: two selects an expression,
 three a form.")
 
+;;; Frontend-local extensions to Lem's key vocabulary. Core needs no
+;;; knowledge of the terminal protocol or of keypad provenance.
+(lem:define-named-key "Keypad0")
+(lem:define-named-key "Keypad1")
+(lem:define-named-key "Keypad2")
+(lem:define-named-key "Keypad3")
+(lem:define-named-key "Keypad4")
+(lem:define-named-key "Keypad5")
+(lem:define-named-key "Keypad6")
+(lem:define-named-key "Keypad7")
+(lem:define-named-key "Keypad8")
+(lem:define-named-key "Keypad9")
+(lem:define-named-key "KeypadAdd")
+(lem:define-named-key "KeypadSubtract")
+(lem:define-named-key "KeypadMultiply")
+(lem:define-named-key "KeypadDivide")
+(lem:define-named-key "KeypadDecimal")
+
+(defparameter *keypad-names*
+  '(("0" . "Keypad0") ("1" . "Keypad1") ("2" . "Keypad2")
+    ("3" . "Keypad3") ("4" . "Keypad4") ("5" . "Keypad5")
+    ("6" . "Keypad6") ("7" . "Keypad7") ("8" . "Keypad8")
+    ("9" . "Keypad9") ("+" . "KeypadAdd") ("-" . "KeypadSubtract")
+    ("*" . "KeypadMultiply") ("/" . "KeypadDivide") ("." . "KeypadDecimal"))
+  "Distinct names for modified keypad characters. Enter and navigation
+keep their existing Lem names, and unmodified characters insert normally.")
+
 ;;; What the display sends (ADR 0011), as Lisp data a codec decodes into.
 
 (defstruct (input (:constructor nil))
@@ -52,10 +80,12 @@ SEQ   the display's number for the message it came in, counting from 1
 
 (defstruct (key-input (:include input)
                       (:constructor make-key-input
-                          (name &key ctrl meta shift super time seq)))
+                          (name &key ctrl meta shift super keypad time seq)))
   "A key: NAME as Lem names keys (\"a\", \"Return\", \"F5\", \" \"...)
-plus modifiers."
-  name ctrl meta shift super)
+plus modifiers. KEYPAD records this event's provenance independently of
+the terminal's advertised capabilities. Naming modified keypad keys is
+the relay's responsibility, just as shift normalisation is."
+  name ctrl meta shift super keypad)
 
 (defstruct (abort-input (:include input)
                         (:constructor make-abort-input (&key time seq)))
@@ -94,16 +124,24 @@ REPLY-TO." text reply-to)
 (defun key-event (input)
   "The Lem key for INPUT.
 
-Shift is dropped from keys that insert themselves, since the character
-already carries it, except with meta: M-S-a is Lem's M-A."
+Shift is folded into printable Ctrl/Meta shortcuts: C-S-g and C-G both
+become C-G, distinct from C-g. Plain text keeps its received character;
+named keys retain Shift. Modified keypad characters get their own names
+from this event's provenance, without consulting session capabilities."
   (let* ((name (key-input-name input))
+         (name (if (and (key-input-keypad input)
+                        (or (key-input-ctrl input) (key-input-meta input)
+                            (key-input-shift input) (key-input-super input)))
+                   (or (cdr (assoc name *keypad-names* :test #'equal)) name)
+                   name))
          (name (if (string= name " ") "Space" name))
          (inserts (lem:insertion-key-sym-p name)))
     (lem:make-key :ctrl (key-input-ctrl input)
                   :meta (key-input-meta input)
                   :super (key-input-super input)
                   :shift (and (not inserts) (key-input-shift input))
-                  :sym (if (and inserts (key-input-shift input) (key-input-meta input))
+                  :sym (if (and inserts (key-input-shift input)
+                                (or (key-input-ctrl input) (key-input-meta input)))
                            (string-upcase name)
                            name))))
 
