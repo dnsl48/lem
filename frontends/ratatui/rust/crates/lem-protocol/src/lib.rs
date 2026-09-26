@@ -1,4 +1,9 @@
-//! Types for the `lem-server` JSON-RPC display protocol.
+//! Types for the display protocol.
+//!
+//! [`v1`] is `lem.relay.v1`, generated from the schema both halves share
+//! (ADR 0010). Everything else in this crate is the `lem-server` JSON-RPC
+//! protocol the display spoke first, which retires once the display runs
+//! on `v1` (relay-plan.md, phase 2).
 //!
 //! This crate deliberately knows nothing about terminals. Everything here
 //! is decoding and shape: given the bytes Lem emits, produce typed frames.
@@ -13,6 +18,7 @@
 
 pub mod framing;
 pub mod rpc;
+pub mod v1;
 
 use serde::{Deserialize, Serialize};
 
