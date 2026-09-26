@@ -45,5 +45,6 @@ plugin, which the Makefile puts on PATH."
                (:file "relay")
                (:file "input")
                (:file "json")
-               (:file "protobuf"))
+               (:file "protobuf")
+               (:file "golden"))
   :perform (test-op (o c) (symbol-call :rove '#:run c)))
