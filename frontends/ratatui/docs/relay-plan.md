@@ -165,6 +165,13 @@ gone.
    a new `make distclean` removes it. Document the prerequisites in the
    README: a C++17 compiler, CMake, zlib. **No change to the root
    `qlfile`.**
+
+   *Done.* 2m38s from scratch on 12 cores, a no-op after. `toolchain/bin/protoc`
+   is a wrapper script rather than a symlink: make judges a symlink by
+   its target's mtime, which predates the stamp, and protoc finds its
+   bundled `.proto` imports relative to its real location. The protobuf
+   install lives under `.build/`, out of qlot's searcher's way.
+   `PROTOC_PREFIX` was tried against an existing install: 7.5s, plugin only.
 2. **Write `relay.proto`** to [0011](adr/0011-a-frame-oriented-protocol.md).
    Resolve its open questions first: icon glyphs and the mouse shape.
    Character width is settled by [0012](adr/0012-the-relay-frame-model.md).
