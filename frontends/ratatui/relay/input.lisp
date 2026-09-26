@@ -1,6 +1,9 @@
 (defpackage :lem-relay/input
   (:use :cl :lem-relay/relay)
-  (:export :key-input
+  (:export :input
+           :input-time
+           :input-seq
+           :key-input
            :make-key-input
            :abort-input
            :make-abort-input
@@ -13,35 +16,71 @@
            :clipboard-reply
            :make-clipboard-reply
            :key-event
+           :*click-interval*
+           :count-click
            :deliver))
 (in-package :lem-relay/input)
 
+(defparameter *click-interval* 0.5
+  "Seconds within which another press of the same button on the same cell
+counts as a double, then triple, click. Set it in init.lisp:
+
+  (setf lem-relay/input:*click-interval* 0.4)
+
+The display reports every press as it happens and the relay counts them
+(ADR 0013), since Lem acts on the count: two selects an expression,
+three a form.")
+
 ;;; What the display sends (ADR 0011), as Lisp data a codec decodes into.
 
-(defstruct (key-input (:constructor make-key-input
-                          (name &key ctrl meta shift super)))
+(defstruct (input (:constructor nil))
+  "What every input has (ADR 0013), each NIL when the wire does not carry
+it, as today's JSON does not:
+
+TIME  when the display saw it, in microseconds on the display's monotonic
+      clock; compared only with other display times.
+SEQ   the display's number for the message it came in, counting from 1
+      per session; with the session id it identifies the input."
+  (time nil)
+  (seq nil))
+
+(defstruct (key-input (:include input)
+                      (:constructor make-key-input
+                          (name &key ctrl meta shift super time seq)))
   "A key: NAME as Lem names keys (\"a\", \"Return\", \"F5\", \" \"...)
 plus modifiers."
   name ctrl meta shift super)
 
-(defstruct (abort-input (:constructor make-abort-input ()))
+(defstruct (abort-input (:include input)
+                        (:constructor make-abort-input (&key time seq)))
   "Stop what the editor is doing (C-g). A message of its own, not a key:
 a queued key would wait behind the very work it is meant to stop.")
 
-(defstruct (paste-input (:constructor make-paste-input (text)))
+(defstruct (paste-input (:include input)
+                        (:constructor make-paste-input (text &key time seq)))
   "TEXT pasted into the terminal, inserted as the major mode pastes." text)
 
-(defstruct (mouse-input (:constructor make-mouse-input
-                            (action x y &key button (clicks 1) (wheel-x 0) (wheel-y 0))))
-  "A mouse event at cell X, Y. ACTION is :down, :up, :move or :wheel;
-BUTTON is :left, :middle, :right or NIL."
-  action x y button clicks wheel-x wheel-y)
+(defstruct (mouse-input (:include input)
+                        (:constructor make-mouse-input
+                            (action x y &key button (wheel-x 0) (wheel-y 0) time seq)))
+  "A mouse event at screen cell X, Y. ACTION is :down, :up, :move or
+:wheel; BUTTON is :left, :middle, :right or NIL. Wheel deltas are lines,
+positive up and left, as Lem reads them. A press carries no click count:
+the relay counts (`count-click')."
+  action x y button wheel-x wheel-y)
 
-(defstruct (resize-input (:constructor make-resize-input (width height)))
+(defstruct (press (:constructor make-press (button x y time clicks)))
+  button x y time clicks)
+
+(defstruct (resize-input (:include input)
+                         (:constructor make-resize-input (width height &key time seq)))
   "The display is now WIDTH by HEIGHT cells." width height)
 
-(defstruct (clipboard-reply (:constructor make-clipboard-reply (id text)))
-  "The display's clipboard, answering request ID." id text)
+(defstruct (clipboard-reply (:include input)
+                            (:constructor make-clipboard-reply
+                                (text &key reply-to time seq)))
+  "The display's clipboard TEXT, answering the request the relay sent as
+REPLY-TO." text reply-to)
 
 ;;; Delivery. Ported from lem-server's `input-callback'
 ;;; (frontends/server/main.lisp:792).
@@ -68,6 +107,25 @@ already carries it, except with meta: M-S-a is Lem's M-A."
     (:middle :button-2)
     (:right :button-3)
     ((nil) nil)))
+
+(defun now-microseconds ()
+  (floor (* (get-internal-real-time) 1000000) internal-time-units-per-second))
+
+(defun count-click (relay button x y time)
+  "How many clicks a press of BUTTON at X, Y at TIME (microseconds) makes:
+one more than the last press if that was the same button, on the same
+cell, within `*click-interval*'; otherwise one."
+  (let* ((last (relay-last-press relay))
+         (clicks (if (and last
+                          (eq button (press-button last))
+                          (eql x (press-x last))
+                          (eql y (press-y last))
+                          (<= (- time (press-time last))
+                              (* *click-interval* 1000000)))
+                     (1+ (press-clicks last))
+                     1)))
+    (setf (relay-last-press relay) (make-press button x y time clicks))
+    clicks))
 
 (defgeneric deliver (relay input)
   (:documentation "Hand INPUT from the display to Lem.
@@ -102,7 +160,13 @@ clipboard reply, which the editor thread is blocked waiting for.")
             (relay-mouse-y relay) y)
       (ecase (mouse-input-action input)
         (:down (when button
-                 (lem:receive-mouse-button-down x y x y button (mouse-input-clicks input))))
+                 (lem:receive-mouse-button-down
+                  x y x y button
+                  ;; When the display saw the press, not when it arrived
+                  ;; (ADR 0013). A wire without timestamps falls back to
+                  ;; arrival, which a local pipe makes nearly the same.
+                  (count-click relay button x y
+                               (or (input-time input) (now-microseconds))))))
         (:up (when button
                (lem:receive-mouse-button-up x y x y button)))
         (:move (lem:receive-mouse-motion x y x y button))
@@ -113,4 +177,9 @@ clipboard reply, which the editor thread is blocked waiting for.")
     (set-display-size relay (resize-input-width input) (resize-input-height input))
     (lem:send-event :resize))
   (:method ((relay relay) (input clipboard-reply))
-    (clipboard-replied relay (clipboard-reply-id input) (clipboard-reply-text input))))
+    (clipboard-replied relay (clipboard-reply-reply-to input) (clipboard-reply-text input)))
+  (:method :after ((relay relay) (input input))
+    ;; What the next frame can reflect (ADR 0013). A plain assignment:
+    ;; inputs are delivered in wire order, from the one reading thread.
+    (alexandria:when-let ((seq (input-seq input)))
+      (setf (relay-input-seq relay) seq))))

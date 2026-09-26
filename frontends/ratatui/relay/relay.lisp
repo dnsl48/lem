@@ -10,14 +10,16 @@
            :relay-foreground
            :relay-background
            :relay-editor-thread
+           :relay-last-press
            :relay-mouse-x
            :relay-mouse-y
            :set-display-size
            :set-clipboard
            :set-clipboard-text
            :clipboard-request
-           :clipboard-request-id
-           :clipboard-replied))
+           :make-clipboard-request
+           :clipboard-replied
+           :relay-input-seq))
 (in-package :lem-relay/relay)
 
 (defparameter *clipboard-timeout* 0.1
@@ -30,9 +32,10 @@ clipboard must not stall the editor.")
 (defstruct (set-clipboard (:constructor make-set-clipboard (text)))
   "Put TEXT on the display's clipboard." text)
 
-(defstruct (clipboard-request (:constructor make-clipboard-request (id)))
-  "Ask the display for its clipboard; the answer comes back as a
-`clipboard-replied' call with the same ID." id)
+(defstruct (clipboard-request (:constructor make-clipboard-request ()))
+  "Ask the display for its clipboard. The answer names this request by
+its `seq', as `reply_to' (ADR 0013), and arrives as a
+`clipboard-replied' call.")
 
 ;;; The relay
 
@@ -49,7 +52,8 @@ run time, never baked into a saved image.")
     :accessor relay-sink
     :documentation "Function of one argument, called on Lem's editor thread
 with each `frame' and each envelope message for the display. A codec
-supplies it.")
+supplies it, and returns the `seq' it gave the message: messages are
+numbered as they are written, in wire order (ADR 0013).")
    (display-width :initform 80 :accessor relay-display-width)
    (display-height :initform 24 :accessor relay-display-height)
    (foreground
@@ -68,6 +72,11 @@ decides light or dark theme mode from it.")
     :accessor relay-editor-thread
     :documentation "Lem's editor thread, recorded by the codec's
 `lem-if:invoke' when it starts it; abort interrupts it.")
+   (last-press
+    :initform nil
+    :accessor relay-last-press
+    :documentation "The last mouse press, for counting clicks: see
+`lem-relay/input:count-click'.")
    (mouse-x :initform -1 :accessor relay-mouse-x)
    (mouse-y :initform -1 :accessor relay-mouse-y)
    (painted
@@ -77,7 +86,11 @@ decides light or dark theme mode from it.")
 latest first. `redraw-display' visits every window each time, in
 painter's order, so this is the stacking order (ADR 0012).")
    (last-view-id :initform 0 :accessor relay-last-view-id)
-   (last-request-id :initform 0 :accessor relay-last-request-id)
+   (input-seq
+    :initform nil
+    :accessor relay-input-seq
+    :documentation "The `seq' of the last display message handed to Lem,
+recorded by `lem-relay/input:deliver'; each frame carries it.")
    (clipboard-replies :initform (queue:make-concurrent-queue)
                       :reader relay-clipboard-replies))
   (:documentation "The relay's half of a Lem implementation: every `lem-if'
@@ -89,6 +102,8 @@ The concrete class combines it with `lem:implementation', and a codec
 gives it a sink and an event loop (`lem-if:invoke')."))
 
 (defun send (relay message)
+  "Hand MESSAGE to the sink; return the `seq' it was sent as, or NIL when
+there is no sink."
   (alexandria:when-let ((sink (relay-sink relay)))
     (funcall sink message)))
 
@@ -240,7 +255,8 @@ gives it a sink and an event loop (`lem-if:invoke')."))
                      :views (remove-duplicates (reverse (relay-painted relay))
                                                :from-end t)))
     (setf (relay-painted relay) '())
-    (alexandria:when-let ((frame (finish-frame session (current-cursor relay))))
+    (alexandria:when-let ((frame (finish-frame session (current-cursor relay)
+                                               (relay-input-seq relay))))
       (send relay frame))))
 
 ;;; Clipboard
@@ -249,12 +265,12 @@ gives it a sink and an event loop (`lem-if:invoke')."))
   (send relay (make-set-clipboard text)))
 
 (defmethod lem-if:clipboard-paste ((relay relay))
-  (let ((id (incf (relay-last-request-id relay))))
-    (send relay (make-clipboard-request id))
-    (await-clipboard relay id)))
+  (alexandria:when-let ((seq (send relay (make-clipboard-request))))
+    (await-clipboard relay seq)))
 
 (defun await-clipboard (relay id)
-  "The text replied to request ID, or NIL after `*clipboard-timeout*'.
+  "The text replied to the request sent as ID, or NIL after
+`*clipboard-timeout*'.
 A late reply to an earlier request is discarded, not mistaken for this
 one's."
   (loop :with deadline := (+ (get-internal-real-time)
@@ -267,11 +283,11 @@ one's."
               (when (and reply (eql id (car reply)))
                 (return (cdr reply))))))
 
-(defun clipboard-replied (relay id text)
-  "Hand the display's clipboard TEXT, answering request ID, to the
-`lem-if:clipboard-paste' waiting for it.
+(defun clipboard-replied (relay reply-to text)
+  "Hand the display's clipboard TEXT, answering the request sent as
+REPLY-TO, to the `lem-if:clipboard-paste' waiting for it.
 
 Called from the thread reading the display, never the editor's: the
 editor thread is blocked in `lem-if:clipboard-paste' waiting for exactly
 this, so the reply cannot go through `lem:send-event' (ADR 0012)."
-  (queue:enqueue (relay-clipboard-replies relay) (cons id text)))
+  (queue:enqueue (relay-clipboard-replies relay) (cons reply-to text)))

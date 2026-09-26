@@ -15,6 +15,9 @@ dequeues first, so ignoring the error still discards the event."
   (loop :while (plusp (lem:event-queue-length))
         :do (ignore-errors (lem:receive-event 0))))
 
+(defun press-clicks-of (relay)
+  (lem-relay/input::press-clicks (relay-last-press relay)))
+
 (defun next-event ()
   (lem:receive-event 0.5))
 
@@ -82,6 +85,60 @@ dequeues first, so ignoring the error still discards the event."
                              (deliver (make-instance 'input-relay)
                                       (make-mouse-input :up 0 0)))))))
 
+;;; Counting clicks (ADR 0013): the display reports presses, the relay counts
+
+(defun at (seconds)
+  "SECONDS as microseconds, the unit of input times and `count-click'."
+  (round (* seconds 1000000)))
+
+(defun clicks-for (presses)
+  "The click count of each press in PRESSES, (button x y seconds) each."
+  (let ((relay (make-instance 'input-relay)))
+    (mapcar (lambda (press)
+              (destructuring-bind (button x y seconds) press
+                (count-click relay button x y (at seconds))))
+            presses)))
+
+(deftest quick-presses-on-one-cell-count-up
+  (ok (equal '(1 2 3) (clicks-for '((:button-1 5 5 0) (:button-1 5 5 0.2) (:button-1 5 5 0.4))))))
+
+(deftest a-slow-second-press-starts-again
+  (ok (equal '(1 1) (clicks-for '((:button-1 5 5 0) (:button-1 5 5 0.9))))))
+
+(deftest a-press-elsewhere-starts-again
+  (ok (equal '(1 1) (clicks-for '((:button-1 5 5 0) (:button-1 6 5 0.1))))))
+
+(deftest another-button-starts-again
+  (ok (equal '(1 1) (clicks-for '((:button-1 5 5 0) (:button-3 5 5 0.1))))))
+
+(deftest the-interval-is-configurable
+  (let ((*click-interval* 1.0))
+    (ok (equal '(1 2) (clicks-for '((:button-1 5 5 0) (:button-1 5 5 0.9))))))
+  (let ((*click-interval* 0.1))
+    (ok (equal '(1 1) (clicks-for '((:button-1 5 5 0) (:button-1 5 5 0.2)))))))
+
+(deftest a-delivered-double-click-reaches-lem-as-one
+  ;; Delivered back to back, well inside the interval.
+  (drain)
+  (let ((relay (make-instance 'input-relay)))
+    (deliver relay (make-mouse-input :down 3 3 :button :left))
+    (deliver relay (make-mouse-input :down 3 3 :button :left))
+    (ok (= 2 (press-clicks-of relay)))))
+
+(deftest clicks-are-counted-by-when-the-display-saw-them
+  ;; Arrival is irrelevant when presses carry their own time: here they
+  ;; arrive far apart but were made close together, and vice versa.
+  (let ((relay (make-instance 'input-relay)))
+    (deliver relay (make-mouse-input :down 3 3 :button :left :time (at 10)))
+    (sleep 0.6)
+    (deliver relay (make-mouse-input :down 3 3 :button :left :time (at 10.2)))
+    (ok (= 2 (press-clicks-of relay)) "slow to arrive, quick to make: a double click"))
+  (let ((relay (make-instance 'input-relay)))
+    (deliver relay (make-mouse-input :down 3 3 :button :left :time (at 10)))
+    (deliver relay (make-mouse-input :down 3 3 :button :left :time (at 11)))
+    (ok (= 1 (press-clicks-of relay)) "quick to arrive, slow to make: two singles"))
+  (drain))
+
 ;;; Everything else
 
 (deftest a-resize-records-the-size-and-tells-the-editor
@@ -97,9 +154,26 @@ dequeues first, so ignoring the error still discards the event."
 
 (deftest a-clipboard-reply-answers-the-waiting-paste
   (let ((relay (make-instance 'input-relay)))
-    ;; The next request will be number 1.
-    (deliver relay (make-clipboard-reply 1 "from the display"))
+    ;; The request goes out as message 8; the reply names it.
+    (setf (relay-sink relay) (lambda (message) (declare (ignore message)) 8))
+    (deliver relay (make-clipboard-reply "from the display" :reply-to 8))
     (ok (equal "from the display" (lem-if:clipboard-paste relay)))))
+
+(deftest a-reply-to-another-request-is-not-taken
+  (let ((relay (make-instance 'input-relay)))
+    (setf (relay-sink relay) (lambda (message) (declare (ignore message)) 8))
+    (deliver relay (make-clipboard-reply "stale" :reply-to 5))
+    (ok (null (lem-if:clipboard-paste relay)))))
+
+(deftest delivering-an-input-records-its-seq
+  (drain)
+  (let ((relay (make-instance 'input-relay)))
+    (deliver relay (make-key-input "a" :seq 3))
+    (deliver relay (make-key-input "b"))
+    (ok (= 3 (relay-input-seq relay)) "an input without a seq leaves it be")
+    (deliver relay (make-key-input "c" :seq 4))
+    (ok (= 4 (relay-input-seq relay))))
+  (drain))
 
 (deftest abort-interrupts-the-editor-thread
   (let* ((relay (make-instance 'input-relay))

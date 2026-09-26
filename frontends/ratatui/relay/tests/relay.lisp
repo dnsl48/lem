@@ -24,7 +24,7 @@ real editor in-process, the way Lem's own tests use lem-fake-interface."))
 (defun call-with-editor (function)
   (let ((*sent* '())
         (relay (make-instance 'test-relay)))
-    (setf (relay-sink relay) (lambda (message) (push message *sent*)))
+    (setf (relay-sink relay) (lambda (message) (push message *sent*) (length *sent*)))
     (lem:with-current-buffers ()
       (lem:with-implementation relay
         (lem:setup-first-frame)
@@ -131,6 +131,12 @@ editors have run in one process, as tests do, the two can be different
       (ok defaults "the next frame carries it")
       (ok (eql #x224466 (defaults-background defaults))))))
 
+(deftest a-frame-carries-the-last-input-delivered
+  (with-editor (relay)
+    (lem-relay/input:deliver relay (lem-relay/input:make-resize-input 80 24 :seq 17))
+    (redraw)
+    (ok (= 17 (frame-input-seq (last-frame))))))
+
 (deftest a-cursor-shape-change-is-a-frame
   (with-editor (relay)
     (redraw)
@@ -148,13 +154,16 @@ editors have run in one process, as tests do, the two can be different
 
 (defun replying-relay (reply)
   "A relay whose display answers clipboard requests with REPLY, or not at
-all when REPLY is NIL."
-  (let ((relay (make-instance 'test-relay)))
+all when REPLY is NIL. Its sink numbers messages as a codec does."
+  (let ((relay (make-instance 'test-relay))
+        (seq 0))
     (setf (relay-sink relay)
           (lambda (message)
             (push message *sent*)
+            (incf seq)
             (when (and reply (typep message 'clipboard-request))
-              (clipboard-replied relay (clipboard-request-id message) reply))))
+              (clipboard-replied relay seq reply))
+            seq))
     relay))
 
 (deftest pasting-asks-the-display

@@ -280,9 +280,11 @@ Nothing here is required for the PoC; each is its own piece of work.
   cursor with its shape, theme colours, stacking order).
 - **Report the jsonrpc stdio defects upstream** (protocol-notes section
   13). We no longer depend on them, but `lem-server --mode stdio` does.
-- **Mouse and images.** The relay delivers mouse input, but the display
-  does not capture the mouse yet (so terminal-native selection still
-  works), and a terminal draws no images.
+- **Mouse and images.** The relay delivers mouse input and counts
+  double and triple clicks (`lem-relay/input:*click-interval*`, 0.5 s),
+  but the display does not capture the mouse yet. When it does, in phase
+  2, terminal-native selection moves to Shift+drag, which most terminals
+  keep while an application has the mouse. A terminal draws no images.
 - **No tabbar.** Lem's lives in `lem-server` and is html-only, so it is
   not loaded here; a terminal-native one would be a feature, not a port.
 - **The frame multiplexer is off** until the display composites by

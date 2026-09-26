@@ -71,13 +71,19 @@ has already gone out."
     (add-op session (make-rest-cleared :view 1 :y 5))
     (ok (null (finish session)) "painting another view changes nothing here")))
 
-(deftest frames-are-numbered-only-when-sent
+(deftest a-frame-says-which-input-it-can-reflect
   (let ((session (settled-session)))
     (add-op session (put 1 0 "a"))
-    (ok (= 2 (frame-seq (finish session))))
-    (finish session)
+    (ok (= 41 (frame-input-seq (finish-frame session nil 41))))
     (add-op session (put 1 0 "b"))
-    (ok (= 3 (frame-seq (finish session))))))
+    (ok (null (frame-input-seq (finish-frame session nil))) "none yet")))
+
+(deftest frames-carry-the-relays-time
+  (let* ((session (settled-session))
+         (first (progn (add-op session (put 1 0 "a")) (finish session)))
+         (second (progn (sleep 0.01) (add-op session (put 1 0 "b")) (finish session))))
+    (ok (integerp (frame-time first)))
+    (ok (< (frame-time first) (frame-time second)) "monotonic, in microseconds")))
 
 (deftest a-frame-keeps-its-ops-in-order
   (let ((session (make-session))

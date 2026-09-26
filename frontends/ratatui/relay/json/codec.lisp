@@ -3,10 +3,10 @@
   (:import-from :lem-relay/relay
    :set-clipboard
    :set-clipboard-text
-   :clipboard-request
-   :clipboard-request-id)
+   :clipboard-request)
   (:export :codec-state
            :make-codec-state
+           :next-seq
            :encode
            :notification
            :response
@@ -21,11 +21,21 @@
 ;;; not sent.
 
 (defstruct (codec-state (:constructor make-codec-state ()))
-  "What the JSON codec remembers across messages: the cursor shape last
-announced, and the clipboard request last sent. Today's wire has no
-request ids, so a reply answers the latest request."
+  "What the JSON codec remembers across messages: the `seq' last given to
+an outgoing message, the cursor shape last announced, and the `seq' of
+the clipboard request last sent.
+
+Today's wire carries no `seq', but messages are still numbered (ADR
+0013): the relay matches a clipboard reply to its request by it. The
+wire has no `reply_to' either, so a reply answers the latest request."
+  (seq 0)
   (cursor-shape nil)
-  (clipboard-request-id nil))
+  (clipboard-request-seq nil))
+
+(defun next-seq (state)
+  "Number the next outgoing message. Call under the output lock, so
+numbers follow wire order."
+  (incf (codec-state-seq state)))
 
 ;;; JSON values
 
@@ -152,15 +162,16 @@ they changed, as lem-server sends them, then one `bulk'."
           notifications)
     (nreverse notifications)))
 
-(defun encode (message state)
+(defun encode (message state seq)
   "The framed-message bodies (octet vectors) standing for MESSAGE, a
-`frame' or an envelope message from the relay, in the order to send them."
+`frame' or an envelope message from the relay, sent as SEQ, in the order
+to send them."
   (etypecase message
     (frame (frame-notifications message state))
     (set-clipboard
      (list (notification "set-clipboard-text" (obj "text" (set-clipboard-text message)))))
     (clipboard-request
-     (setf (codec-state-clipboard-request-id state) (clipboard-request-id message))
+     (setf (codec-state-clipboard-request-seq state) seq)
      (list (notification "get-clipboard-text" (obj))))))
 
 ;;; What the display sends
@@ -187,7 +198,6 @@ EQUAL hash tables."
 (defun mouse-from (action value)
   (make-mouse-input action (gethash "x" value) (gethash "y" value)
                     :button (mouse-button (gethash "button" value))
-                    :clicks (or (gethash "clicks" value) 1)
                     :wheel-x (or (gethash "wheelX" value) 0)
                     :wheel-y (or (gethash "wheelY" value) 0)))
 
@@ -226,6 +236,6 @@ lem-server's `input-callback' reads them."
         ("redraw" (list :redraw (size "width") (size "height")))
         ("input" (cons :input (input-from params)))
         ("got-clipboard-text"
-         (list :input (make-clipboard-reply (codec-state-clipboard-request-id state)
-                                            (gethash "text" params))))
+         (list :input (make-clipboard-reply (gethash "text" params)
+                                            :reply-to (codec-state-clipboard-request-seq state))))
         (t (list :ignored method))))))

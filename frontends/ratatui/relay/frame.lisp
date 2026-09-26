@@ -78,7 +78,8 @@
    :defaults-foreground
    :defaults-background
    :frame
-   :frame-seq
+   :frame-time
+   :frame-input-seq
    :frame-ops
    :frame-cursor
    :frame-defaults
@@ -200,12 +201,19 @@ here, over the cell painted with a cursor style (ADR 0012)."
 colour of NIL means these; a NIL here means the terminal's own."
   foreground background)
 
-(defstruct (frame (:constructor %make-frame (seq ops cursor defaults)))
+(defstruct (frame (:constructor %make-frame (time input-seq ops cursor defaults)))
   "One display update: OPS in order, then the cursor.
 
-DEFAULTS is a `defaults' when they changed since the last frame sent, and
-NIL when they did not."
-  seq ops cursor defaults)
+TIME is when the relay closed it, in microseconds on the relay's
+monotonic clock. INPUT-SEQ is the `seq' of the last display message the
+relay had handed to Lem by then, or NIL if none: what this frame can
+reflect, for tracing and replay (ADR 0013). A frame's own identity is
+its envelope's `seq', assigned as it is sent. DEFAULTS is a `defaults'
+when they changed since the last frame sent, and NIL when they did not."
+  time input-seq ops cursor defaults)
+
+(defun now-microseconds ()
+  (floor (* (get-internal-real-time) 1000000) internal-time-units-per-second))
 
 (defstruct (session (:constructor make-session (&key (suppress t))))
   "What the relay has told the display so far, and the frame being built.
@@ -218,7 +226,6 @@ the stacking order and the default colours.
 Used only from Lem's editor thread, where every lem-if drawing call runs."
   (suppress t)
   (pending '())
-  (seq 0)
   (cleared-from (make-hash-table :test 'eql))
   (last-cursor nil)
   (last-modeline (make-hash-table :test 'eql))
@@ -284,9 +291,9 @@ after."
       (when (typep op 'rest-cleared)
         (setf (gethash (rest-cleared-view op) cleared-from) (rest-cleared-y op))))))
 
-(defun finish-frame (session cursor)
-  "Close the frame being built with CURSOR (a `cursor', or NIL) and return
-it, or NIL when suppression finds it would change nothing on screen:
+(defun finish-frame (session cursor &optional input-seq)
+  "Close the frame being built with CURSOR (a `cursor', or NIL) and
+INPUT-SEQ (see `frame') and return it, or NIL when suppression finds it would change nothing on screen:
 every op redundant, the cursor as it was, the default colours as they
 were. Either way the next frame starts empty."
   (let* ((ops (reverse (session-pending session)))
@@ -304,7 +311,8 @@ were. Either way the next frame starts empty."
            (setf (session-last-cursor session) cursor
                  (session-sent-defaults session) (copy-defaults defaults))
            (incf (session-sent-count session))
-           (%make-frame (incf (session-seq session))
+           (%make-frame (now-microseconds)
+                        input-seq
                         ops
                         cursor
                         (and defaults-changed (copy-defaults defaults)))))))
