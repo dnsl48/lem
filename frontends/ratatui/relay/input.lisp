@@ -5,6 +5,11 @@
            :input-seq
            :key-input
            :make-key-input
+           :key-input-name
+           :key-input-ctrl
+           :key-input-meta
+           :key-input-shift
+           :key-input-super
            :abort-input
            :make-abort-input
            :paste-input

@@ -190,6 +190,13 @@ gone.
    varint length-delimited framing. Implement the `Hello`/`Welcome`/`Exit`
    handshake. The frame model should not need to change; if it does,
    phase 1 got the model wrong, so fix it there.
+
+   *Done:* `relay/protobuf/` (framing, codec, `serve`), 16 Rove tests.
+   The frame model did not need to change. `Key` names are mapped here
+   ([0014](adr/0014-the-display-describes-keys.md)); a `Hello` without a
+   `protocol_version` gets `Exit` with the reason; the editor exiting
+   sends `Exit` before the stream ends. `lem-ratatui` does not use it
+   yet: it switches over once the display speaks it (step 4).
 4. **`lem-protocol` rewrite.** Its `build.rs` uses `protox` and `prost-build`.
    Framing uses `decode_length_delimited`. Remove `serde` and `serde_json`.
    Then move `lem-ratatui` (`views.rs`, `paint.rs`, `input.rs`,

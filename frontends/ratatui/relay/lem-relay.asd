@@ -22,12 +22,28 @@ lem-protocol crate reads it. Transitional (relay-plan.md, phase 1)."
                (:file "codec")
                (:file "serve")))
 
+(defsystem "lem-relay/protobuf"
+  :description "lem-relay speaking lem.relay.v1, the protobuf protocol of
+ADRs 0010-0014, defined in frontends/ratatui/proto. Needs `make
+toolchain`: loading compiles the schema with protoc and cl-protobufs'
+plugin, which the Makefile puts on PATH."
+  :defsystem-depends-on ("cl-protobufs.asdf")
+  :depends-on ("lem-relay" "cl-protobufs")
+  :pathname "protobuf/"
+  :serial t
+  :components ((:protobuf-source-file "relay"
+                :proto-pathname "../../proto/lem/relay/v1/relay.proto")
+               (:file "framing")
+               (:file "codec")
+               (:file "serve")))
+
 (defsystem "lem-relay/tests"
-  :depends-on ("lem-relay" "lem-relay/json" "rove" "flexi-streams")
+  :depends-on ("lem-relay" "lem-relay/json" "lem-relay/protobuf" "rove" "flexi-streams")
   :pathname "tests/"
   :components ((:file "frame")
                (:file "draw")
                (:file "relay")
                (:file "input")
-               (:file "json"))
+               (:file "json")
+               (:file "protobuf"))
   :perform (test-op (o c) (symbol-call :rove '#:run c)))
