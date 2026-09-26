@@ -39,6 +39,29 @@ has already gone out."
   (ok (eql #xFF0000 (style-underline (attribute-style (lem:make-attribute :underline "#FF0000")))))
   (ok (eq t (style-underline (attribute-style (lem:make-attribute :underline t))))))
 
+(deftest font-styles-come-from-the-property-list
+  (let ((style (attribute-style (lem:make-attribute
+                                 :foreground "#FF0000"
+                                 :plist '(:italic t :strikethrough t :dim t)))))
+    (ok (style-italic style))
+    (ok (style-strikethrough style))
+    (ok (style-dim style)))
+  (ng (style-italic (attribute-style (lem:make-attribute :foreground "#FF0000")))))
+
+(deftest font-styles-survive-merging
+  ;; Lem merges a syntax attribute with the region's, say; the property
+  ;; lists are appended, so the italic is kept.
+  (let ((merged (lem:merge-attribute (lem:make-attribute :plist '(:italic t))
+                                     (lem:make-attribute :background "#303030"))))
+    (ok (style-italic (attribute-style merged)))
+    (ok (eql #x303030 (style-background (attribute-style merged))))))
+
+(deftest a-background-fill-keeps-every-other-slot
+  (let ((style (style-with-background (make-style :foreground 1 :italic t :dim t :cursor t) 2)))
+    (ok (= 2 (style-background style)))
+    (ok (and (style-italic style) (style-dim style) (style-cursor style)
+             (= 1 (style-foreground style))))))
+
 ;;; Frame suppression
 
 (deftest a-frame-with-nothing-new-in-it-is-not-sent

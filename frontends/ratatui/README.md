@@ -67,6 +67,7 @@ lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' class: relay + capability flags
   transport.lisp             stdin/stdout as the wire, everything else muffled
+  font-styles.lisp           which attributes are italic, struck through, dim
   main.lisp                  entry point, and lem-if:invoke
 relay/                       lem-relay (ADR 0009, 0012)
   lem-relay.asd              lem-relay, lem-relay/protobuf, lem-relay/tests
@@ -280,7 +281,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 10 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 11 checks
 ```
 
 ## Next steps
@@ -306,6 +307,18 @@ Nothing here is required for the PoC; each is its own piece of work.
   to change, upstream.
 
 ## Keys and mouse
+
+**Font styles.** Markdown emphasis is drawn in italic. Any attribute can
+be italic, struck through or dim, through its property list
+([ADR 0015](docs/adr/0015-font-styles-without-touching-lem.md)): in a
+definition, `(define-attribute my-attribute (t :foreground "#aaaaaa"
+:plist '(:italic t)))`; for attributes defined elsewhere, in `init.lisp`,
+
+```lisp
+#+lem-ratatui
+(push '(lem:syntax-comment-attribute :italic :dim)
+      lem-ratatui/font-styles:*attribute-font-styles*)
+```
 
 **C-]** interrupts the editor when it is busy (`abort`), as in the ncurses
 and browser frontends. C-g is an ordinary key, so `keyboard-quit` works as

@@ -48,12 +48,7 @@ background itself, but not a terminal."
     (cond ((null background) style)
           ((null style) (make-style :background background))
           ((style-background style) style)
-          (t (make-style :foreground (style-foreground style)
-                         :background background
-                         :bold (style-bold style)
-                         :reverse (style-reverse style)
-                         :underline (style-underline style)
-                         :cursor (style-cursor style))))))
+          (t (style-with-background style background)))))
 
 (defun put (view x y text style &optional (width (lem:string-width text)))
   (make-text-put :view (view-id view) :x x :y y :text text :width width :style style))

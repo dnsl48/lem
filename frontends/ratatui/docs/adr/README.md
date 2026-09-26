@@ -29,9 +29,10 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | [0009](0009-our-own-relay.md) | Our own relay, `lem-relay`, instead of `lem-server` | Accepted |
 | [0010](0010-protobuf-for-schema-and-codec.md) | Protobuf for the schema and the codec | Accepted |
 | [0011](0011-a-frame-oriented-protocol.md) | A frame-oriented protocol designed for a terminal | Accepted (principles; schema in phase 2); refined by 0012; open questions answered by 0012, 0013 |
-| [0012](0012-the-relay-frame-model.md) | The relay's frame model | Accepted |
+| [0012](0012-the-relay-frame-model.md) | The relay's frame model | Accepted; italic follow-up superseded by 0015 |
 | [0013](0013-icons-and-mouse-input.md) | Icons as text, clicks counted by the relay, and every message's identity and time | Accepted |
 | [0014](0014-the-display-describes-keys.md) | The display describes keys; the relay names them | Accepted |
+| [0015](0015-font-styles-without-touching-lem.md) | Font styles without touching Lem: italic, strikethrough, dim | Accepted |
 
 ## Adding one
 

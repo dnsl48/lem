@@ -142,6 +142,22 @@ check(10, "the terminal's colours reach Lem, and their absence costs no wait",
       "#DDDDDD on #FAFAFA" in answered and "unknown on unknown" in silent and first_frame,
       f"answered: {answered[-24:]!r}; silent: {silent[-24:]!r}; first frame within 3s: {first_frame}")
 
+# --- 11: font styles reach the terminal -----------------------------------
+# Markdown emphasis is drawn in document-italic-attribute, which
+# lem-ratatui marks :italic after every theme load (ADR 0015). The relay
+# carries it and the display turns it into SGR 3.
+with open("/tmp/lem-accept-italic.md", "w") as f:
+    f.write("plain *emphasis* plain\n")
+s = Session(); s.pump(8)
+m = s.mark()
+s.send([b"\x18", b"\x06"]); s.pump(1.5)           # C-x C-f
+s.send("/tmp/lem-accept-italic.md"); s.send([b"\r"]); s.pump(3)
+drawn = s.since(m)
+check(11, "Markdown emphasis is drawn in italic",
+      "\x1b[3m" in drawn and "emphasis" in s.plain(m),
+      f"SGR 3 sent: {'\x1b[3m' in drawn}")
+s.kill()
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")

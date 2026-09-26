@@ -113,6 +113,30 @@
     (ok (pb:style.underline style))
     (ok (= #xFF0000 (pb:style.underline-color style)))))
 
+(deftest font-styles-are-encoded
+  (let* ((state (codec:make-codec-state))
+         (session (make-session))
+         (style (first (pb:frame.styles
+                        (pb:to-display.frame
+                         (to-display (codec:encode
+                                      (sample-frame session
+                                                    :style (make-style :italic t :strikethrough t :dim t))
+                                      state 1)))))))
+    (ok (pb:style.italic style))
+    (ok (pb:style.strikethrough style))
+    (ok (pb:style.dim style))))
+
+(deftest styles-differing-only-in-font-style-get-different-ids
+  (let* ((state (codec:make-codec-state))
+         (session (make-session)))
+    (add-op session (make-text-put :view 1 :x 0 :y 0 :text "a" :width 1
+                                   :style (make-style :foreground 1)))
+    (add-op session (make-text-put :view 1 :x 1 :y 0 :text "b" :width 1
+                                   :style (make-style :foreground 1 :italic t)))
+    (ok (= 2 (length (pb:frame.styles
+                      (pb:to-display.frame
+                       (to-display (codec:encode (finish-frame session nil) state 1)))))))))
+
 (deftest the-other-messages-encode
   (let ((state (codec:make-codec-state)))
     (ok (equal "copied" (pb:set-clipboard.text

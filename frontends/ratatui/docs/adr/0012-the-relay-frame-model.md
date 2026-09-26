@@ -158,6 +158,10 @@ its event queue until the wait timed out.
 
 ## Follow-ups outside this plan
 
+*The italic follow-up below is superseded by
+[0015](0015-font-styles-without-touching-lem.md), which does it without a
+core change.*
+
 - **Italic.** Ratatui renders it, but Lem's attribute has no italic slot
   (`src/attribute.lisp:5`). `document-italic-attribute` is defined only
   by a colour for that reason. Real italic needs a core change: a slot

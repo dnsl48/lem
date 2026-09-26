@@ -29,6 +29,16 @@ pub fn style_of(style: &v1::Style) -> Style {
     if style.reverse {
         out = out.add_modifier(Modifier::REVERSED);
     }
+    // Font styles (ADR 0015).
+    if style.italic {
+        out = out.add_modifier(Modifier::ITALIC);
+    }
+    if style.strikethrough {
+        out = out.add_modifier(Modifier::CROSSED_OUT);
+    }
+    if style.dim {
+        out = out.add_modifier(Modifier::DIM);
+    }
     if style.underline {
         out = out.add_modifier(Modifier::UNDERLINED);
         if let Some(underline) = style.underline_color {
@@ -136,6 +146,25 @@ mod tests {
         assert!(style.add_modifier.contains(Modifier::REVERSED));
         assert!(style.add_modifier.contains(Modifier::UNDERLINED));
         assert_eq!(style.underline_color, Some(Color::Rgb(0, 0xFF, 0)));
+    }
+
+    #[test]
+    fn font_styles_map_to_modifiers() {
+        let style = style_of(&v1::Style {
+            id: 1,
+            italic: true,
+            strikethrough: true,
+            dim: true,
+            ..Default::default()
+        });
+        for modifier in [Modifier::ITALIC, Modifier::CROSSED_OUT, Modifier::DIM] {
+            assert!(style.add_modifier.contains(modifier), "{modifier:?}");
+        }
+        assert!(
+            !style_of(&v1::Style::default())
+                .add_modifier
+                .contains(Modifier::ITALIC)
+        );
     }
 
     #[test]
