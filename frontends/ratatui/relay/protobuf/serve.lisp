@@ -19,8 +19,9 @@ whichever thread sends (ADR 0013)."
 (defun unpack-color (rgb)
   (and rgb (lem:make-color (ldb (byte 8 16) rgb) (ldb (byte 8 8) rgb) (ldb (byte 8 0) rgb))))
 
-(defun hello (relay output lock state ready version session-id width height foreground background)
-  "Take the display's `Hello': its size and colours, then `Welcome', then
+(defun hello (relay output lock state ready version session-id width height foreground background
+              capabilities)
+  "Take the display's `Hello': its size, colours and capabilities, then `Welcome', then
 let the editor start (see `serve'). Return NIL when the display cannot
 be served, having told it why with `Exit'."
   (when (zerop version)
@@ -34,6 +35,9 @@ be served, having told it why with `Exit'."
             (if background (format nil "#~6,'0X" background) "unknown"))
   (when (and (plusp width) (plusp height))
     (relay:set-display-size relay width height))
+  ;; A reader-only slot: the codec sets handshake state before the editor
+  ;; starts. User configuration observes an immutable value after this.
+  (reinitialize-instance relay :terminal-capabilities capabilities)
   ;; The terminal's own colours: what Lem judges light or dark mode by
   ;; until a theme sets its own.
   (alexandria:when-let ((color (unpack-color foreground)))

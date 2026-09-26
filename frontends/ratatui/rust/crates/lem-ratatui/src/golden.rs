@@ -12,7 +12,10 @@
 
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use lem_protocol::v1::{self, to_editor};
 
 use crate::input;
@@ -23,6 +26,18 @@ fn fixtures() -> PathBuf {
 
 fn key(code: KeyCode, modifiers: KeyModifiers) -> to_editor::Message {
     to_editor::Message::Key(input::key(KeyEvent::new(code, modifiers)).expect("a known key"))
+}
+
+fn keypad(code: KeyCode, modifiers: KeyModifiers) -> to_editor::Message {
+    to_editor::Message::Key(
+        input::key(KeyEvent::new_with_kind_and_state(
+            code,
+            modifiers,
+            KeyEventKind::Press,
+            KeyEventState::KEYPAD,
+        ))
+        .expect("a known keypad key"),
+    )
 }
 
 fn mouse(kind: MouseEventKind) -> to_editor::Message {
@@ -47,6 +62,11 @@ fn session() -> Vec<(u64, to_editor::Message)> {
                 height: 30,
                 foreground: None,
                 background: Some(0x101010),
+                capabilities: Some(v1::TerminalCapabilities {
+                    keyboard_disambiguation: true,
+                    alternate_key_reporting: true,
+                    keypad_identity: true,
+                }),
             }),
         ),
         (1_000, key(KeyCode::Char('x'), KeyModifiers::CONTROL)),
@@ -56,10 +76,34 @@ fn session() -> Vec<(u64, to_editor::Message)> {
             4_000,
             key(KeyCode::Char('A'), KeyModifiers::ALT | KeyModifiers::SHIFT),
         ),
-        (5_000, key(KeyCode::Char('4'), KeyModifiers::CONTROL)),
+        (5_000, key(KeyCode::Char('\\'), KeyModifiers::CONTROL)),
         (6_000, key(KeyCode::Char(' '), KeyModifiers::NONE)),
         (7_000, key(KeyCode::BackTab, KeyModifiers::SHIFT)),
         (8_000, key(KeyCode::Char('é'), KeyModifiers::NONE)),
+        (9_000, key(KeyCode::Char('č'), KeyModifiers::NONE)),
+        (10_000, key(KeyCode::Char('š'), KeyModifiers::NONE)),
+        (
+            11_000,
+            key(
+                KeyCode::Char('g'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        ),
+        (12_000, key(KeyCode::Char('G'), KeyModifiers::CONTROL)),
+        (13_000, key(KeyCode::Char('g'), KeyModifiers::CONTROL)),
+        (14_000, key(KeyCode::Char('5'), KeyModifiers::CONTROL)),
+        (15_000, keypad(KeyCode::Char('5'), KeyModifiers::CONTROL)),
+        (
+            16_000,
+            keypad(
+                KeyCode::Char('5'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT,
+            ),
+        ),
+        (17_000, keypad(KeyCode::Char('5'), KeyModifiers::NONE)),
+        (18_000, keypad(KeyCode::Char('+'), KeyModifiers::CONTROL)),
+        (19_000, keypad(KeyCode::Enter, KeyModifiers::NONE)),
+        (20_000, keypad(KeyCode::Left, KeyModifiers::SHIFT)),
         (1_000_000, mouse(MouseEventKind::Down(MouseButton::Left))),
         (1_200_000, mouse(MouseEventKind::Down(MouseButton::Left))),
         (1_300_000, mouse(MouseEventKind::Drag(MouseButton::Right))),

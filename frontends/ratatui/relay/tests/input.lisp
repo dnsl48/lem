@@ -55,6 +55,55 @@ dequeues first, so ignoring the error still discards the event."
     (ok (equal "A" (lem:key-sym key)))
     (ok (lem:key-meta key))))
 
+(deftest ctrl-shift-letter-is-the-capital-not-the-unshifted-command
+  (let ((lowercase (key-event (make-key-input "g" :ctrl t :shift t)))
+        (uppercase (key-event (make-key-input "G" :ctrl t)))
+        (quit (key-event (make-key-input "g" :ctrl t))))
+    (ok (eq lowercase uppercase))
+    (ok (eq lowercase (first (lem:parse-keyspec "C-G"))))
+    (ng (eq lowercase quit))
+    (ng (lem:key-shift lowercase))))
+
+(deftest unicode-text-keeps-its-character
+  (dolist (text '("č" "š" "Č" "Š" "日本"))
+    (ok (equal text (lem:key-sym (key-event (make-key-input text))))))
+  (dolist (text '("č" "š" "Č" "Š"))
+    (let ((key (key-event (make-key-input text :shift t))))
+      (ok (equal text (lem:key-sym key)))
+      (ng (lem:key-shift key)))))
+
+(deftest modified-keypad-characters-have-distinct-bindable-names
+  (loop :for text :in '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"
+                         "+" "-" "*" "/" ".")
+        :for name :in '("Keypad0" "Keypad1" "Keypad2" "Keypad3" "Keypad4"
+                         "Keypad5" "Keypad6" "Keypad7" "Keypad8" "Keypad9"
+                         "KeypadAdd" "KeypadSubtract" "KeypadMultiply"
+                         "KeypadDivide" "KeypadDecimal")
+        :do (let ((key (key-event (make-key-input text :ctrl t :keypad t))))
+              (ok (equal name (lem:key-sym key)))
+              (ok (equalp key (first (lem:parse-keyspec (concatenate 'string "C-" name)))))
+              (ng (equalp key (key-event (make-key-input text :ctrl t))))))
+  (let ((key (key-event (make-key-input "5" :meta t :shift t :keypad t))))
+    (ok (equal "Keypad5" (lem:key-sym key)))
+    (ok (lem:key-meta key))
+    (ok (lem:key-shift key))))
+
+(deftest ordinary-keypad-typing-enter-and-navigation-keep-their-meaning
+  (dolist (text '("5" "+" "." "Return" "Left"))
+    (ok (equalp (key-event (make-key-input text :keypad t))
+                (key-event (make-key-input text)))))
+  (dolist (name '("Return" "Left" "Home" "Delete"))
+    (ok (equalp (key-event (make-key-input name :ctrl t :shift t :keypad t))
+                (key-event (make-key-input name :ctrl t :shift t))))))
+
+(deftest keypad-events-do-not-depend-on-capability-advertisements
+  (dolist (capabilities (list nil (make-terminal-capabilities)
+                             (make-terminal-capabilities :keypad-identity t)))
+    (drain)
+    (let ((relay (make-instance 'input-relay :terminal-capabilities capabilities)))
+      (deliver relay (make-key-input "5" :ctrl t :keypad t))
+      (ok (equal "Keypad5" (lem:key-sym (next-event)))))))
+
 (deftest a-delivered-key-reaches-the-editor-queue
   (drain)
   (deliver (make-instance 'input-relay) (make-key-input "q"))
@@ -82,6 +131,13 @@ dequeues first, so ignoring the error still discards the event."
   (ok (= 1 (queued-after (lambda ()
                            (deliver (make-instance 'input-relay)
                                     (make-key-input "g" :ctrl t)))))))
+
+(deftest real-ctrl-five-stays-a-key-including-on-the-keypad
+  (dolist (keypad '(nil t))
+    (drain)
+    (deliver (make-instance 'input-relay) (make-key-input "5" :ctrl t :keypad keypad))
+    (ok (= 1 (lem:event-queue-length)))
+    (ok (equal (if keypad "Keypad5" "5") (lem:key-sym (next-event))))))
 
 ;;; Mouse
 

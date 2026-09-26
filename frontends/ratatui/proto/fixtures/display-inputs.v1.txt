@@ -5,13 +5,20 @@ ToEditor {
     message: Some(
         Hello(
             Hello {
-                protocol_version: 1,
+                protocol_version: 2,
                 session_id: "01920000-0000-7000-8000-000000000000",
                 width: 100,
                 height: 30,
                 foreground: None,
                 background: Some(
                     1052688,
+                ),
+                capabilities: Some(
+                    TerminalCapabilities {
+                        keyboard_disambiguation: true,
+                        alternate_key_reporting: true,
+                        keypad_identity: true,
+                    },
                 ),
             },
         ),
@@ -26,6 +33,7 @@ ToEditor {
                 modifiers: [
                     Ctrl,
                 ],
+                keypad: false,
                 code: Some(
                     Text(
                         "x",
@@ -42,6 +50,7 @@ ToEditor {
         Key(
             Key {
                 modifiers: [],
+                keypad: false,
                 code: Some(
                     Named(
                         Enter,
@@ -58,6 +67,7 @@ ToEditor {
         Key(
             Key {
                 modifiers: [],
+                keypad: false,
                 code: Some(
                     Function(
                         5,
@@ -77,6 +87,7 @@ ToEditor {
                     Meta,
                     Shift,
                 ],
+                keypad: false,
                 code: Some(
                     Text(
                         "A",
@@ -95,6 +106,7 @@ ToEditor {
                 modifiers: [
                     Ctrl,
                 ],
+                keypad: false,
                 code: Some(
                     Text(
                         "\\",
@@ -111,6 +123,7 @@ ToEditor {
         Key(
             Key {
                 modifiers: [],
+                keypad: false,
                 code: Some(
                     Text(
                         " ",
@@ -129,6 +142,7 @@ ToEditor {
                 modifiers: [
                     Shift,
                 ],
+                keypad: false,
                 code: Some(
                     Named(
                         Tab,
@@ -145,6 +159,7 @@ ToEditor {
         Key(
             Key {
                 modifiers: [],
+                keypad: false,
                 code: Some(
                     Text(
                         "é",
@@ -156,6 +171,228 @@ ToEditor {
 }
 ToEditor {
     seq: 10,
+    time_us: 9000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "č",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 11,
+    time_us: 10000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "š",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 12,
+    time_us: 11000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                    Shift,
+                ],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "g",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 13,
+    time_us: 12000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                ],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "G",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 14,
+    time_us: 13000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                ],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "g",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 15,
+    time_us: 14000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                ],
+                keypad: false,
+                code: Some(
+                    Text(
+                        "5",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 16,
+    time_us: 15000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                ],
+                keypad: true,
+                code: Some(
+                    Text(
+                        "5",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 17,
+    time_us: 16000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                    Meta,
+                ],
+                keypad: true,
+                code: Some(
+                    Text(
+                        "5",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 18,
+    time_us: 17000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [],
+                keypad: true,
+                code: Some(
+                    Text(
+                        "5",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 19,
+    time_us: 18000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Ctrl,
+                ],
+                keypad: true,
+                code: Some(
+                    Text(
+                        "+",
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 20,
+    time_us: 19000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [],
+                keypad: true,
+                code: Some(
+                    Named(
+                        Enter,
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 21,
+    time_us: 20000,
+    message: Some(
+        Key(
+            Key {
+                modifiers: [
+                    Shift,
+                ],
+                keypad: true,
+                code: Some(
+                    Named(
+                        Left,
+                    ),
+                ),
+            },
+        ),
+    ),
+}
+ToEditor {
+    seq: 22,
     time_us: 1000000,
     message: Some(
         Mouse(
@@ -174,7 +411,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 11,
+    seq: 23,
     time_us: 1200000,
     message: Some(
         Mouse(
@@ -193,7 +430,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 12,
+    seq: 24,
     time_us: 1300000,
     message: Some(
         Mouse(
@@ -214,7 +451,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 13,
+    seq: 25,
     time_us: 1400000,
     message: Some(
         Mouse(
@@ -234,7 +471,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 14,
+    seq: 26,
     time_us: 2000000,
     message: Some(
         Paste(
@@ -245,7 +482,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 15,
+    seq: 27,
     time_us: 2100000,
     message: Some(
         Resize(
@@ -257,7 +494,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 16,
+    seq: 28,
     time_us: 2200000,
     message: Some(
         ClipboardReply(
@@ -271,7 +508,7 @@ ToEditor {
     ),
 }
 ToEditor {
-    seq: 17,
+    seq: 29,
     time_us: 2300000,
     message: Some(
         ClipboardReply(

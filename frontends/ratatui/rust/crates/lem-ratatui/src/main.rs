@@ -11,6 +11,7 @@ mod colors;
 #[cfg(test)]
 mod golden;
 mod input;
+mod keyboard;
 mod metrics;
 mod paint;
 mod present;
@@ -112,6 +113,12 @@ fn main() -> Result<()> {
         height: u32::from(height),
         foreground: colors.foreground,
         background: colors.background,
+        capabilities: Some(
+            guard
+                .as_ref()
+                .map(term::Guard::capabilities)
+                .unwrap_or_default(),
+        ),
     }))?;
 
     let mut frames = 0usize;

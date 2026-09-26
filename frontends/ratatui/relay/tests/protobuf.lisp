@@ -209,6 +209,16 @@
     (ok (= 9 (input-seq input)))
     (ok (= 12345 (input-time input)))))
 
+(deftest keypad-provenance-survives-the-wire-and-older-keys-default-to-false
+  (let ((keypad (decoded-input :key (pb:make-key :text "5" :keypad t
+                                                :modifiers '(:modifier-ctrl))))
+        (older (decoded-input :key (pb:make-key :text "5"
+                                               :modifiers '(:modifier-ctrl)))))
+    (ok (key-input-keypad keypad))
+    (ng (key-input-keypad older))
+    (ok (equal "Keypad5" (lem:key-sym (key-event keypad))))
+    (ok (equal "5" (lem:key-sym (key-event older))))))
+
 (deftest mouse-events-decode
   (let ((press (decoded-input :mouse (pb:make-mouse :x 3 :y 4
                                                     :press (pb:make-press :button :button-left))))
@@ -230,11 +240,39 @@
     (ok (null (lem-relay/input::clipboard-reply-text without)))))
 
 (deftest a-hello-decodes
-  (ok (equal '(:hello 1 1 "s" 100 30 nil #x101010)
+  (ok (equal '(:hello 1 1 "s" 100 30 nil #x101010 nil)
              (codec:decode (to-editor :seq 1 :hello (pb:make-hello :protocol-version 1
                                                                    :session-id "s"
                                                                    :width 100 :height 30
                                                                    :background #x101010))))))
+
+(deftest hello-capability-presence-is-separate-from-false-flags
+  (flet ((capabilities (&rest args)
+           (car (last (codec:decode
+                       (to-editor :hello (apply #'pb:make-hello :protocol-version 2 args)))))))
+    (ok (null (capabilities)) "an older peer has unknown capabilities")
+    (let ((legacy (capabilities :capabilities (pb:make-terminal-capabilities)))
+          (enhanced (capabilities :capabilities
+                                   (pb:make-terminal-capabilities
+                                    :keyboard-disambiguation t :alternate-key-reporting t
+                                    :keypad-identity t))))
+      (ok (typep legacy 'relay:terminal-capabilities))
+      (ng (relay:terminal-capabilities-keyboard-disambiguation legacy))
+      (ng (relay:terminal-capabilities-alternate-key-reporting legacy))
+      (ng (relay:terminal-capabilities-keypad-identity legacy))
+      (ok (relay:terminal-capabilities-keyboard-disambiguation enhanced))
+      (ok (relay:terminal-capabilities-alternate-key-reporting enhanced))
+      (ok (relay:terminal-capabilities-keypad-identity enhanced)))))
+
+(deftest unknown-fields-do-not-change-a-known-message
+  (let* ((body (to-editor :seq 3 :hello (pb:make-hello
+                                       :protocol-version 2
+                                       :capabilities (pb:make-terminal-capabilities))))
+         ;; Field 99, varint 1: a future optional envelope addition.
+         (extended (concatenate '(vector (unsigned-byte 8)) body (octets #x98 #x06 #x01))))
+    (ok (equalp (codec:decode body) (codec:decode extended))))
+  ;; Unknown oneof member: still safe to ignore the message altogether.
+  (ok (equal '(:ignored) (codec:decode (octets #xA2 #x06 #x00)))))
 
 ;;; Serving
 
@@ -262,6 +300,7 @@
         "returns when the display hangs up")
     (ok (eq :started (bt2:join-thread editor)) "after the Hello")
     (ok (= 100 (lem-if:display-width relay)))
+    (ok (null (relay:relay-terminal-capabilities relay)) "older Hello remains supported")
     (ok (eql #x101010 (pack-color (lem-if:get-background-color relay))))
     (let ((welcome (first (written output))))
       (ok (equal "s-1" (pb:welcome.session-id (pb:to-display.welcome welcome))) "echoed")
@@ -269,6 +308,35 @@
     (ok (= 2 (relay:relay-input-seq relay)) "the key was delivered, as display message 2")
     (let ((event (lem:receive-event 0.5)))
       (ok (equal "q" (lem:key-sym event))))))
+
+(deftest serve-publishes-capabilities-before-the-editor-starts
+  (dolist (enhanced '(nil t))
+    (let* ((relay (make-instance 'serve-relay))
+           (input (flexi-streams:make-in-memory-input-stream
+                   (delimited
+                    (to-editor :hello (pb:make-hello
+                                       :protocol-version 2 :width 80 :height 24
+                                       :capabilities (pb:make-terminal-capabilities
+                                                      :keyboard-disambiguation enhanced
+                                                      :alternate-key-reporting enhanced
+                                                      :keypad-identity enhanced))))))
+           (output (flexi-streams:make-in-memory-output-stream))
+           (editor nil))
+      (serve:serve relay
+                   (lambda (initialize finalize)
+                     (declare (ignore finalize))
+                     (setf editor (bt2:make-thread
+                                   (lambda ()
+                                     (funcall initialize)
+                                     (relay:relay-terminal-capabilities relay)))))
+                   :input input :output output)
+      (let ((capabilities (bt2:join-thread editor)))
+        (ok (typep capabilities 'relay:terminal-capabilities))
+        (ok (eql enhanced (relay:terminal-capabilities-keyboard-disambiguation capabilities)))
+        (ok (eql enhanced (relay:terminal-capabilities-alternate-key-reporting capabilities)))
+        (ok (eql enhanced (relay:terminal-capabilities-keypad-identity capabilities))))))
+  (ng (fboundp '(setf relay:relay-terminal-capabilities)) "the session accessor is read-only")
+  (ng (fboundp '(setf relay:terminal-capabilities-keypad-identity)) "flags are read-only too"))
 
 (deftest a-hello-without-a-version-is-refused-out-loud
   (let* ((relay (make-instance 'serve-relay))

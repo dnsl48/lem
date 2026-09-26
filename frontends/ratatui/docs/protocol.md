@@ -66,6 +66,38 @@ judges light or dark mode by them unless a theme decides. There is no "redraw" s
 follows on its own. A `Hello` the relay cannot serve (no
 `protocol_version`) gets `Exit` with the reason, not silence.
 
+Schema revision **2** adds optional `Hello.capabilities` and `Key.keypad`.
+Older peers remain supported: absent fields have their original meanings,
+and a revision number greater than 1 does not require these additions.
+
+Before `Hello`, the display negotiates keyboard enhancements with a
+one-second overall deadline, using `/dev/tty` for queries. It requests
+escape-code disambiguation and alternate-key reporting, then queries the
+active flags to confirm the result. Errors, unsupported terminals and
+timeouts fall back to legacy input; `LEM_RATATUI_KEYBOARD=legacy` skips
+negotiation. Crossterm is the sole input reader and retains keys typed
+during negotiation. The protocol pipes never carry terminal queries.
+
+`Hello.capabilities` contains the confirmed keyboard features:
+
+| Field | Meaning |
+|---|---|
+| `keyboard_disambiguation` | Escape-code disambiguation is active. |
+| `alternate_key_reporting` | Alternate-key reporting is active. |
+| `keypad_identity` | The input protocol can report keypad provenance; individual terminals and lock states may still lose it. |
+
+An absent message means unknown capabilities or an older display; a
+present message with every flag false means a known legacy session. The
+relay records this before it starts the editor. User configuration can
+read `lem-relay/relay:relay-terminal-capabilities` on `(lem:implementation)`:
+it returns `NIL` for unknown, or an immutable `terminal-capabilities`
+instance with readers `terminal-capabilities-keyboard-disambiguation`,
+`terminal-capabilities-alternate-key-reporting` and
+`terminal-capabilities-keypad-identity` in the same package.
+`M-x describe-terminal-capabilities` displays that state on demand.
+These capabilities describe reporting support; the provenance on each
+key event is authoritative regardless of what the handshake advertised.
+
 ## Frames
 
 A frame is one Lem redraw (`lem-if:update-display`): the ops since the
@@ -116,11 +148,21 @@ consumes:
 - **Keys** are described, not named: the character typed, a `NamedKey`,
   or a function key number, with modifiers as reported. The relay maps
   them to Lem's names and applies Lem's shift rules: Alt+Shift+a is
-  `M-A`, a space is `Space`. It also turns **C-]** into an abort, which
+  `M-A`; Ctrl+Shift+g and Ctrl+G both become `C-G`, distinct from `C-g`.
+  Plain Unicode text keeps its received character and named keys retain
+  Shift. A space is `Space`. It also turns **C-]** into an abort, which
   interrupts the editor thread instead of queueing, as ncurses and the
   browser client do. Decoding the terminal's bytes correctly is the
-  display's job: crossterm's Ctrl+4..7 are sent as the C-\ C-] C-^ C-_
-  the terminal meant.
+  display's job: legacy bytes 0x1C–0x1F decode as C-\ C-] C-^ C-_, while
+  actual Ctrl+4..7 events from enhanced input remain those digit chords.
+- **Keypad provenance** is `Key.keypad`, independently of the key code
+  and modifiers. Modified keypad digits/operators use frontend-local Lem
+  names `Keypad0` through `Keypad9`, `KeypadAdd`, `KeypadSubtract`,
+  `KeypadMultiply`, `KeypadDivide` and `KeypadDecimal`. For example,
+  `C-Keypad5` can be bound separately from `C-5`. Unmodified keypad
+  characters insert normally; Enter and navigation retain their existing
+  names and modifiers. If provenance is unavailable, the ordinary key is
+  delivered, so configurations should retain accessible alternatives.
 - **Mouse** events come in cells as they happen, with no click count.
   The relay counts clicks: the same button on the same cell within
   `lem-relay/input:*click-interval*` (0.5 s), judged by the display's
@@ -143,6 +185,10 @@ reason is empty for a normal exit, or the editor's crash report. The
 display restores the terminal and then prints the reason, so it can be
 read. If the display hangs up instead, the relay's reader sees the end
 of the stream and Lem's process ends with it.
+
+The terminal guard and panic hook share restoration ownership. Keyboard
+flags are popped exactly once before leaving the alternate screen; raw
+mode restoration is still attempted if writing a cleanup sequence fails.
 
 ## Where it is tested
 

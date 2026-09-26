@@ -30,8 +30,13 @@
           (and (lem:key-shift key) :shift))))
 
 (deftest the-hello-carries-the-display
-  (ok (equal '(:hello 1 1 "01920000-0000-7000-8000-000000000000" 100 30 nil #x101010)
-             (first (fixture-requests)))))
+  (let* ((hello (first (fixture-requests)))
+         (capabilities (car (last hello))))
+    (ok (equal '(:hello 1 2 "01920000-0000-7000-8000-000000000000" 100 30 nil #x101010)
+               (butlast hello)))
+    (ok (relay:terminal-capabilities-keyboard-disambiguation capabilities))
+    (ok (relay:terminal-capabilities-alternate-key-reporting capabilities))
+    (ok (relay:terminal-capabilities-keypad-identity capabilities))))
 
 (deftest keys-reach-lem-by-lems-names
   (let ((keys (remove-if-not (lambda (input) (typep input 'key-input)) (inputs))))
@@ -39,10 +44,22 @@
                  ("Return" nil nil nil)          ; Enter
                  ("F5" nil nil nil)
                  ("A" nil :meta nil)             ; Alt+Shift+a: M-A, shift folded in
-                 ("\\" :ctrl nil nil)            ; the byte crossterm calls Ctrl+4
+                 ("\\" :ctrl nil nil)            ; legacy control byte 0x1C
                  ("Space" nil nil nil)
                  ("Tab" nil nil :shift)          ; BackTab
-                 ("é" nil nil nil))
+                 ("é" nil nil nil)
+                 ("č" nil nil nil)
+                 ("š" nil nil nil)
+                 ("G" :ctrl nil nil)             ; lower+Shift and upper agree
+                 ("G" :ctrl nil nil)
+                 ("g" :ctrl nil nil)             ; keyboard-quit remains distinct
+                 ("5" :ctrl nil nil)             ; enhanced Ctrl+5 stays Ctrl+5
+                 ("Keypad5" :ctrl nil nil)
+                 ("Keypad5" :ctrl :meta nil)
+                 ("5" nil nil nil)               ; ordinary keypad typing
+                 ("KeypadAdd" :ctrl nil nil)
+                 ("Return" nil nil nil)
+                 ("Left" nil nil :shift))
                (mapcar #'lem-key keys)))))
 
 (deftest every-input-carries-the-displays-seq-and-time

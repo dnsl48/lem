@@ -85,6 +85,20 @@ message Hello {
   // Lem judges light or dark theme mode by them until a theme sets its own.
   optional uint32 foreground = 5;
   optional uint32 background = 6;
+  // Absent means an older peer or unknown capabilities. A present message
+  // with all flags false means the display confirmed legacy keyboard input.
+  TerminalCapabilities capabilities = 7;
+}
+
+// Features confirmed active for this terminal session, after negotiation.
+// These describe what can be reported, not what any individual key was.
+message TerminalCapabilities {
+  bool keyboard_disambiguation = 1;
+  bool alternate_key_reporting = 2;
+  // The input protocol can report keypad provenance. Not every key/lock
+  // state in every terminal is guaranteed distinguishable; Key.keypad is
+  // authoritative for each event, irrespective of these capabilities.
+  bool keypad_identity = 3;
 }
 
 message Welcome {
@@ -319,12 +333,12 @@ message SetClipboard {
 
 // A key, described neutrally: the display does not need to know how Lem
 // names keys. The relay maps it to Lem's name ("Return", "F5", "Space")
-// and applies Lem's shift rules (meta+shift+a is M-A), so that knowledge
+// and applies Lem's shift rules (ctrl+shift+a is C-A), so that knowledge
 // lives in one place (ADR 0014).
 //
-// Decoding the terminal correctly is still the display's job: crossterm,
-// for one, reports the control bytes 0x1C-0x1F as Ctrl+4..7 where the
-// terminal meant C-\ C-] C-^ C-_.
+// Decoding the terminal correctly is still the display's job. Legacy
+// control bytes 0x1C-0x1F mean C-\ C-] C-^ C-_; genuine enhanced Ctrl+4..7
+// remain Ctrl+4..7.
 message Key {
   oneof code {
     // The character typed, as it arrives: "a", "A", "é", " ".
@@ -335,6 +349,11 @@ message Key {
   }
   // Shift+Tab is TAB with MODIFIER_SHIFT.
   repeated Modifier modifiers = 4;
+  // This event came from the keypad, when the terminal reports provenance.
+  // False also covers older displays that cannot report it. The relay names
+  // modified keypad digits/operators distinctly; ordinary typing, Enter,
+  // and navigation retain their usual meanings.
+  bool keypad = 5;
 }
 
 // Lem's keys that are not characters (src/key.lisp), function keys apart.
