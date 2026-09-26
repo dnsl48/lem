@@ -132,6 +132,12 @@ cell, within `*click-interval*'; otherwise one."
     (setf (relay-last-press relay) (make-press button x y time clicks))
     clicks))
 
+(defun abort-key-p (input)
+  "True for C-] and nothing else."
+  (and (equal "]" (key-input-name input))
+       (key-input-ctrl input)
+       (not (or (key-input-meta input) (key-input-shift input) (key-input-super input)))))
+
 (defgeneric deliver (relay input)
   (:documentation "Hand INPUT from the display to Lem.
 
@@ -140,7 +146,12 @@ reaches the editor through its event queue, except the two that must
 not wait in it: abort, which interrupts the editor thread, and a
 clipboard reply, which the editor thread is blocked waiting for.")
   (:method ((relay relay) (input key-input))
-    (lem:send-event (key-event input)))
+    ;; C-] interrupts, as in ncurses and the browser client: the key for
+    ;; an editor too busy to read its keys. C-g stays a key, so
+    ;; keyboard-quit works as ever.
+    (if (abort-key-p input)
+        (deliver relay (make-abort-input :time (input-time input) :seq (input-seq input)))
+        (lem:send-event (key-event input))))
   (:method ((relay relay) (input abort-input))
     (declare (ignore input))
     (alexandria:when-let ((thread (relay-editor-thread relay)))

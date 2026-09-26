@@ -10,15 +10,23 @@
 //! and stdout carry the protocol (`transport.rs`). crossterm already reads
 //! keys and the window size from `/dev/tty` when stdin is not a TTY, so
 //! only output has to be pointed there.
+//!
+//! The mouse is captured (ADR 0013), which takes the terminal's own
+//! click-and-drag selection away; most terminals keep it on Shift+drag.
+//! Bracketed paste is on, so pasted text arrives as one `Paste`.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::Result;
+use crossterm::cursor::{self, SetCursorStyle};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
+use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use crossterm::{cursor, execute};
 
 #[cfg(unix)]
 const TTY: &str = "/dev/tty";
@@ -46,7 +54,13 @@ impl Guard {
 
         enable_raw_mode()?;
         let out = tty.try_clone()?;
-        execute!(&out, EnterAlternateScreen, cursor::Hide)?;
+        execute!(
+            &out,
+            EnterAlternateScreen,
+            cursor::Hide,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
 
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
@@ -71,7 +85,14 @@ impl Drop for Guard {
 }
 
 fn restore(out: &mut impl Write) -> Result<()> {
-    execute!(out, cursor::Show, LeaveAlternateScreen)?;
+    execute!(
+        out,
+        DisableBracketedPaste,
+        DisableMouseCapture,
+        SetCursorStyle::DefaultUserShape,
+        cursor::Show,
+        LeaveAlternateScreen
+    )?;
     disable_raw_mode()?;
     Ok(())
 }

@@ -1,102 +1,101 @@
-//! Turning protocol paint commands into cells.
+//! Turning `lem.relay.v1` ops into cells.
 
-use lem_protocol::{Attribute, Put, Underline};
+use std::collections::HashMap;
+
+use lem_protocol::v1;
+use ratatui_core::buffer::Buffer;
 use ratatui_core::style::{Color, Modifier, Style};
 
-use crate::views::ViewBuffer;
-
-/// Parse a `"#RRGGBB"` wire colour.
-///
-/// Returns `None` for anything else, including the nulls the wire sends
-/// for "no colour set" — those leave the style's field unset so the
-/// terminal's own default shows through.
-pub fn parse_color(raw: &str) -> Option<Color> {
-    let hex = raw.strip_prefix('#')?;
-    if hex.len() != 6 {
-        return None;
-    }
-    let component = |range: std::ops::Range<usize>| u8::from_str_radix(&hex[range], 16).ok();
-    Some(Color::Rgb(
-        component(0..2)?,
-        component(2..4)?,
-        component(4..6)?,
-    ))
+/// A packed `0xRRGGBB`.
+pub fn color(rgb: u32) -> Color {
+    let [_, r, g, b] = rgb.to_be_bytes();
+    Color::Rgb(r, g, b)
 }
 
-/// Map a protocol attribute onto a cell style.
-pub fn style_of(attribute: &Attribute) -> Style {
-    let mut style = Style::default();
-    if let Some(fg) = attribute.foreground.as_deref().and_then(parse_color) {
-        style = style.fg(fg);
+/// A relay style as a cell style. An absent colour stays unset, so the
+/// default colours show through (ADR 0012): the theme's once it sets them,
+/// applied when compositing, or the terminal's own.
+pub fn style_of(style: &v1::Style) -> Style {
+    let mut out = Style::default();
+    if let Some(fg) = style.foreground {
+        out = out.fg(color(fg));
     }
-    if let Some(bg) = attribute.background.as_deref().and_then(parse_color) {
-        style = style.bg(bg);
+    if let Some(bg) = style.background {
+        out = out.bg(color(bg));
     }
-    if attribute.bold {
-        style = style.add_modifier(Modifier::BOLD);
+    if style.bold {
+        out = out.add_modifier(Modifier::BOLD);
     }
-    if attribute.reverse {
-        style = style.add_modifier(Modifier::REVERSED);
+    if style.reverse {
+        out = out.add_modifier(Modifier::REVERSED);
     }
-    match &attribute.underline {
-        Some(Underline::On(true)) => style = style.add_modifier(Modifier::UNDERLINED),
-        Some(Underline::Color(raw)) => {
-            style = style.add_modifier(Modifier::UNDERLINED);
-            if let Some(color) = parse_color(raw) {
-                style = style.underline_color(color);
-            }
+    if style.underline {
+        out = out.add_modifier(Modifier::UNDERLINED);
+        if let Some(underline) = style.underline_color {
+            out = out.underline_color(color(underline));
         }
-        _ => {}
     }
-    style
+    out
 }
 
-/// Paint one run of text into a view.
+/// The session's styles, by id. The relay defines each in the first frame
+/// that uses it; 0, and any id not defined, is no style.
+#[derive(Default)]
+pub struct Styles {
+    table: HashMap<u32, Style>,
+}
+
+impl Styles {
+    pub fn define(&mut self, style: &v1::Style) {
+        self.table.insert(style.id, style_of(style));
+    }
+
+    pub fn get(&self, id: u32) -> Style {
+        self.table.get(&id).copied().unwrap_or_default()
+    }
+}
+
+/// Paint a run of text into exactly `width` cells from (`x`, `y`).
 ///
-/// `Buffer::set_stringn` does the hard part: it splits on graphemes, so
-/// combining marks stay attached, advances by each grapheme's display
-/// width, blanks the trailing cell of a double-width one, and clips at
-/// the right edge. Lem's startup modeline contains U+1F512, so this is
-/// load-bearing from the first frame, not a refinement.
+/// `width` is what Lem laid the text out as taking, and it is
+/// authoritative (ADR 0012): text wider than that is clipped, and text
+/// narrower is padded with blanks in its style, so a character whose width
+/// the two sides disagree on cannot shift the rest of the line.
 ///
-/// It does *not* bound-check the row — it indexes `y` directly and would
-/// panic — so that check is here.
-pub fn put(vb: &mut ViewBuffer, put: &Put) {
-    if put.y >= vb.buffer.area.height {
+/// `Buffer::set_stringn` does the grapheme work: combining marks stay
+/// attached, wide characters take two cells with the second blanked, and
+/// it clips at `width` and at the right edge. It indexes the row directly,
+/// so the row bound is checked here.
+pub fn put(buffer: &mut Buffer, x: u16, y: u16, text: &str, width: u16, style: Style) {
+    let area = buffer.area;
+    if y >= area.height || x >= area.width {
         return;
     }
-    let style = put.attribute.as_ref().map(style_of).unwrap_or_default();
-    vb.buffer
-        .set_stringn(put.x, put.y, &put.text, put.text_width as usize, style);
-}
-
-/// Paint one run of text into a view's modeline row.
-///
-/// `modeline-put` always arrives at `y: 0`, addressing the modeline's own
-/// one-row space rather than the view's.
-pub fn modeline_put(vb: &mut ViewBuffer, put: &Put) {
-    let style = put.attribute.as_ref().map(style_of).unwrap_or_default();
-    vb.modeline
-        .set_stringn(put.x, 0, &put.text, put.text_width as usize, style);
+    let (end, _) = buffer.set_stringn(x, y, text, usize::from(width), style);
+    let limit = x.saturating_add(width).min(area.width);
+    for cx in end..limit {
+        buffer[(cx, y)].reset();
+        buffer[(cx, y)].set_style(style);
+    }
 }
 
 /// Blank the rest of row `y` from column `x`.
-pub fn clear_eol(vb: &mut ViewBuffer, x: u16, y: u16) {
-    let area = vb.buffer.area;
+pub fn clear_eol(buffer: &mut Buffer, x: u16, y: u16) {
+    let area = buffer.area;
     if y >= area.height {
         return;
     }
     for cx in x..area.width {
-        vb.buffer[(cx, y)].reset();
+        buffer[(cx, y)].reset();
     }
 }
 
 /// Blank every row from `y` downwards.
-pub fn clear_eob(vb: &mut ViewBuffer, y: u16) {
-    let area = vb.buffer.area;
+pub fn clear_eob(buffer: &mut Buffer, y: u16) {
+    let area = buffer.area;
     for cy in y..area.height {
         for cx in 0..area.width {
-            vb.buffer[(cx, cy)].reset();
+            buffer[(cx, cy)].reset();
         }
     }
 }
@@ -104,161 +103,114 @@ pub fn clear_eob(vb: &mut ViewBuffer, y: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lem_protocol::{View, ViewInfo, ViewKind, ViewType};
-    use ratatui_core::buffer::Buffer;
     use ratatui_core::layout::Rect;
 
-    fn view_buffer(w: u16, h: u16) -> ViewBuffer {
-        ViewBuffer {
-            view: View {
-                id: 1,
-                x: 0,
-                y: 0,
-                width: w,
-                height: h,
-                use_modeline: None,
-                kind: ViewKind::Tile,
-                content_type: ViewType::Editor,
-                border: None,
-                border_shape: None,
-            },
-            buffer: Buffer::empty(Rect::new(0, 0, w, h)),
-            modeline: Buffer::empty(Rect::new(0, 0, w, 1)),
-        }
-    }
-
-    fn put_at(x: u16, y: u16, text: &str, width: u16, attribute: Option<Attribute>) -> Put {
-        Put {
-            view_info: ViewInfo { id: 1 },
-            x,
-            y,
-            text: text.to_string(),
-            text_width: width,
-            attribute,
-        }
+    fn buffer(w: u16, h: u16) -> Buffer {
+        Buffer::empty(Rect::new(0, 0, w, h))
     }
 
     #[test]
-    fn parses_wire_colors() {
-        assert_eq!(parse_color("#AABBCC"), Some(Color::Rgb(0xAA, 0xBB, 0xCC)));
-        assert_eq!(parse_color("#000000"), Some(Color::Rgb(0, 0, 0)));
-        assert_eq!(parse_color("nonsense"), None);
-        assert_eq!(parse_color("#AABB"), None, "short hex");
-        assert_eq!(parse_color("#GGHHII"), None, "non-hex digits");
+    fn packed_colours_unpack() {
+        assert_eq!(color(0xAABBCC), Color::Rgb(0xAA, 0xBB, 0xCC));
+        assert_eq!(
+            color(0),
+            Color::Rgb(0, 0, 0),
+            "black is a colour, not a default"
+        );
     }
 
     #[test]
-    fn writes_text_at_a_cell_position() {
-        let mut vb = view_buffer(10, 2);
-        put(&mut vb, &put_at(2, 1, "hi", 2, None));
-        assert_eq!(vb.buffer[(2, 1)].symbol(), "h");
-        assert_eq!(vb.buffer[(3, 1)].symbol(), "i");
-    }
-
-    #[test]
-    fn applies_colors_and_bold() {
-        let attribute = Attribute {
-            foreground: Some("#FF0000".into()),
-            background: Some("#000000".into()),
+    fn a_style_maps_colours_and_attributes() {
+        let style = style_of(&v1::Style {
+            id: 1,
+            foreground: Some(0xFF0000),
             bold: true,
-            ..Attribute::default()
-        };
-        let style = style_of(&attribute);
-        assert_eq!(style.fg, Some(Color::Rgb(0xFF, 0, 0)));
-        assert_eq!(style.bg, Some(Color::Rgb(0, 0, 0)));
-        assert!(style.add_modifier.contains(Modifier::BOLD));
-    }
-
-    #[test]
-    fn a_null_colour_leaves_the_style_unset() {
-        // Both fields are genuinely null on the wire for default text.
-        let style = style_of(&Attribute::default());
-        assert_eq!(style.fg, None);
-        assert_eq!(style.bg, None);
-    }
-
-    #[test]
-    fn reverse_and_underline_map_to_modifiers() {
-        let style = style_of(&Attribute {
             reverse: true,
-            underline: Some(Underline::On(true)),
-            ..Attribute::default()
+            underline: true,
+            underline_color: Some(0x00FF00),
+            ..Default::default()
         });
+        assert_eq!(style.fg, Some(Color::Rgb(0xFF, 0, 0)));
+        assert_eq!(style.bg, None, "absent stays unset, for the defaults");
+        assert!(style.add_modifier.contains(Modifier::BOLD));
         assert!(style.add_modifier.contains(Modifier::REVERSED));
-        assert!(style.add_modifier.contains(Modifier::UNDERLINED));
-    }
-
-    #[test]
-    fn underline_color_is_carried_through() {
-        let style = style_of(&Attribute {
-            underline: Some(Underline::Color("#00FF00".into())),
-            ..Attribute::default()
-        });
         assert!(style.add_modifier.contains(Modifier::UNDERLINED));
         assert_eq!(style.underline_color, Some(Color::Rgb(0, 0xFF, 0)));
     }
 
     #[test]
-    fn a_wide_character_occupies_two_cells() {
-        // The capture's modeline carries U+1F512 with textWidth 2. Writing
-        // it as one cell would shift everything after it left by one.
-        let mut vb = view_buffer(6, 1);
-        put(&mut vb, &put_at(1, 0, "\u{1F512}", 2, None));
-        put(&mut vb, &put_at(3, 0, "ab", 2, None));
-        assert_eq!(vb.buffer[(1, 0)].symbol(), "\u{1F512}");
-        // The trailing cell is reset, not emptied: Cell::reset gives it a
-        // space. What matters is that it holds no glyph of its own and the
-        // next grapheme starts two cells along, not one.
-        assert_eq!(vb.buffer[(2, 0)].symbol(), " ", "continuation cell");
-        assert_eq!(vb.buffer[(3, 0)].symbol(), "a");
-        assert_eq!(vb.buffer[(4, 0)].symbol(), "b");
+    fn undefined_style_ids_are_no_style() {
+        let mut styles = Styles::default();
+        styles.define(&v1::Style {
+            id: 3,
+            bold: true,
+            ..Default::default()
+        });
+        assert!(styles.get(3).add_modifier.contains(Modifier::BOLD));
+        assert_eq!(styles.get(0), Style::default());
+        assert_eq!(styles.get(9), Style::default());
     }
 
     #[test]
-    fn writing_past_the_right_edge_does_not_panic() {
-        let mut vb = view_buffer(4, 1);
-        put(&mut vb, &put_at(3, 0, "long", 4, None));
-        assert_eq!(vb.buffer[(3, 0)].symbol(), "l");
+    fn text_goes_where_it_is_put() {
+        let mut b = buffer(10, 2);
+        put(&mut b, 2, 1, "hi", 2, Style::default());
+        assert_eq!(b[(2, 1)].symbol(), "h");
+        assert_eq!(b[(3, 1)].symbol(), "i");
     }
 
     #[test]
-    fn writing_past_the_bottom_edge_does_not_panic() {
-        // set_stringn clips x but indexes y directly, so the row bound is
-        // ours to enforce.
-        let mut vb = view_buffer(4, 2);
-        put(&mut vb, &put_at(0, 9, "off-screen", 10, None));
-        assert_eq!(vb.buffer[(0, 0)].symbol(), " ");
+    fn a_wide_character_takes_two_cells() {
+        let mut b = buffer(6, 1);
+        put(&mut b, 1, 0, "\u{1F512}", 2, Style::default());
+        put(&mut b, 3, 0, "ab", 2, Style::default());
+        assert_eq!(b[(1, 0)].symbol(), "\u{1F512}");
+        assert_eq!(b[(3, 0)].symbol(), "a", "the next run starts two cells on");
     }
 
     #[test]
-    fn clear_eol_blanks_the_rest_of_one_row_only() {
-        let mut vb = view_buffer(5, 2);
-        put(&mut vb, &put_at(0, 0, "abcde", 5, None));
-        put(&mut vb, &put_at(0, 1, "fghij", 5, None));
-        clear_eol(&mut vb, 2, 0);
-        assert_eq!(vb.buffer[(1, 0)].symbol(), "b");
-        assert_eq!(vb.buffer[(2, 0)].symbol(), " ");
-        assert_eq!(vb.buffer[(4, 0)].symbol(), " ");
-        assert_eq!(vb.buffer[(2, 1)].symbol(), "h", "row 1 untouched");
+    fn a_run_is_padded_to_its_width() {
+        // Lem said 4 cells; the text takes 2 here. The rest is blank in
+        // the run's style, not whatever was there before.
+        let mut b = buffer(6, 1);
+        put(&mut b, 0, 0, "xxxxxx", 6, Style::default());
+        let red = Style::default().bg(Color::Rgb(0xFF, 0, 0));
+        put(&mut b, 0, 0, "ab", 4, red);
+        assert_eq!(b[(2, 0)].symbol(), " ");
+        assert_eq!(b[(3, 0)].bg, Color::Rgb(0xFF, 0, 0));
+        assert_eq!(b[(4, 0)].symbol(), "x", "nothing past the width");
     }
 
     #[test]
-    fn clear_eob_blanks_every_row_from_y_down() {
-        let mut vb = view_buffer(3, 3);
+    fn a_run_is_clipped_to_its_width() {
+        let mut b = buffer(6, 1);
+        put(&mut b, 0, 0, "abcdef", 3, Style::default());
+        assert_eq!(b[(2, 0)].symbol(), "c");
+        assert_eq!(b[(3, 0)].symbol(), " ", "clipped at 3");
+    }
+
+    #[test]
+    fn writing_off_the_buffer_does_not_panic() {
+        let mut b = buffer(4, 2);
+        put(&mut b, 3, 0, "long", 4, Style::default());
+        put(&mut b, 0, 9, "off-screen", 10, Style::default());
+        put(&mut b, 9, 0, "off-screen", 10, Style::default());
+        assert_eq!(b[(3, 0)].symbol(), "l");
+    }
+
+    #[test]
+    fn clearing_blanks_what_it_says() {
+        let mut b = buffer(5, 3);
         for y in 0..3 {
-            put(&mut vb, &put_at(0, y, "xyz", 3, None));
+            put(&mut b, 0, y, "abcde", 5, Style::default());
         }
-        clear_eob(&mut vb, 1);
-        assert_eq!(vb.buffer[(0, 0)].symbol(), "x");
-        assert_eq!(vb.buffer[(0, 1)].symbol(), " ");
-        assert_eq!(vb.buffer[(0, 2)].symbol(), " ");
-    }
-
-    #[test]
-    fn clearing_out_of_range_rows_is_a_no_op() {
-        let mut vb = view_buffer(3, 2);
-        clear_eol(&mut vb, 0, 9);
-        clear_eob(&mut vb, 9);
-        assert_eq!(vb.buffer[(0, 0)].symbol(), " ");
+        clear_eol(&mut b, 2, 0);
+        assert_eq!(b[(1, 0)].symbol(), "b");
+        assert_eq!(b[(2, 0)].symbol(), " ");
+        clear_eob(&mut b, 2);
+        assert_eq!(b[(0, 1)].symbol(), "a", "row 1 untouched");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        clear_eol(&mut b, 0, 9);
+        clear_eob(&mut b, 9);
     }
 }

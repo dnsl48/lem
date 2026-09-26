@@ -13,7 +13,8 @@ use std::io::{self, BufReader, BufWriter, Stdin, Stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use lem_protocol::{framing, rpc::Incoming};
+use lem_protocol::v1::{self, to_editor};
+use prost::Message;
 
 /// The protocol stream coming from Lem.
 ///
@@ -25,19 +26,25 @@ pub struct LemReader {
     stdin: BufReader<Stdin>,
 }
 
-/// The protocol stream going to Lem.
+/// The protocol stream going to Lem: numbers and times each message
+/// (ADR 0013).
 pub struct LemWriter {
     stdout: BufWriter<Stdout>,
+    seq: u64,
+    started: Instant,
 }
 
-/// Claim stdin and stdout as the connection to Lem.
-pub fn stdio() -> (LemReader, LemWriter) {
+/// Claim stdin and stdout as the connection to Lem. `started` is the
+/// display's clock origin: every message's `time_us` counts from it.
+pub fn stdio(started: Instant) -> (LemReader, LemWriter) {
     (
         LemReader {
             stdin: BufReader::new(io::stdin()),
         },
         LemWriter {
             stdout: BufWriter::new(io::stdout()),
+            seq: 0,
+            started,
         },
     )
 }
@@ -47,29 +54,24 @@ pub fn stdio() -> (LemReader, LemWriter) {
 /// The size and timing travel with the message so the frame loop can
 /// account for them without the reader knowing what a frame is (ADR 0003).
 pub struct Received {
-    pub incoming: Incoming,
-    /// Framed body length in bytes, excluding the header.
+    pub message: v1::ToDisplay,
+    /// Message length in bytes, excluding its length prefix.
     pub bytes: usize,
-    /// Time spent decoding the JSON-RPC envelope.
+    /// Time spent decoding it.
     pub decode: Duration,
 }
 
 impl LemReader {
     /// Read the next message. `Ok(None)` means Lem hung up.
     pub fn recv(&mut self) -> Result<Option<Received>> {
-        let Some(body) = framing::read_message(&mut self.stdin)? else {
+        let Some(body) = v1::read_delimited(&mut self.stdin)? else {
             return Ok(None);
         };
         let started = Instant::now();
-        let incoming: Incoming = serde_json::from_slice(&body).with_context(|| {
-            format!(
-                "decoding a {} byte message: {}",
-                body.len(),
-                String::from_utf8_lossy(&body[..body.len().min(200)])
-            )
-        })?;
+        let message = v1::ToDisplay::decode(body.as_slice())
+            .with_context(|| format!("decoding a {} byte message", body.len()))?;
         Ok(Some(Received {
-            incoming,
+            message,
             bytes: body.len(),
             decode: started.elapsed(),
         }))
@@ -77,9 +79,15 @@ impl LemReader {
 }
 
 impl LemWriter {
-    /// Send one already-serialised message.
-    pub fn send(&mut self, body: &[u8]) -> Result<()> {
-        framing::write_message(&mut self.stdout, body)?;
-        Ok(())
+    /// Send one message, numbered and timed. Returns its `seq`.
+    pub fn send(&mut self, message: to_editor::Message) -> Result<u64> {
+        self.seq += 1;
+        let envelope = v1::ToEditor {
+            seq: self.seq,
+            time_us: u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX),
+            message: Some(message),
+        };
+        v1::write_delimited(&mut self.stdout, &envelope)?;
+        Ok(self.seq)
     }
 }
