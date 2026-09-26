@@ -68,13 +68,16 @@ lisp/
   transport.lisp             stdin/stdout as the wire, everything else muffled
   main.lisp                  entry point, and lem-if:invoke
 relay/                       lem-relay (ADR 0009, 0012)
-  lem-relay.asd              lem-relay, lem-relay/json, lem-relay/tests
+  lem-relay.asd              lem-relay, lem-relay/json, lem-relay/protobuf, tests
   frame.lisp                 the frame model; suppression of no-op frames
   view.lisp, draw.lisp       drawing objects to ops, ported from lem-server
   relay.lisp                 the lem-if methods
   input.lisp                 what the display sends, delivered to Lem
   json/                      today's wire: framing, codec, the event loop
+  protobuf/                  lem.relay.v1: framing, codec, the event loop
   tests/                     Rove tests, run by `make test`
+proto/lem/relay/v1/
+  relay.proto                the protocol's one schema (ADR 0010-0014)
 scripts/
   acceptance.py              the acceptance checks, driven through a pty
   workload.py                the fixed workload's frames and bytes
