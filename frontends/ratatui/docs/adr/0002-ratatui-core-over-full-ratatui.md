@@ -1,6 +1,9 @@
 # 0002. Depend on `ratatui-core`, not full Ratatui
 
 **Status:** Accepted — September 2026
+**Revised by:** [0016](0016-underline-styles.md): `ratatui-core` stays, but
+the display writes to the terminal itself, in place of `Terminal` and
+`ratatui-crossterm`, to draw underline styles.
 
 ## Context
 

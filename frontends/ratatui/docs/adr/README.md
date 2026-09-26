@@ -19,7 +19,7 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-reuse-lem-server-jsonrpc.md) | Reuse the `lem-server` JSON-RPC protocol | Superseded by 0009 |
-| [0002](0002-ratatui-core-over-full-ratatui.md) | Depend on `ratatui-core`, not full Ratatui | Accepted |
+| [0002](0002-ratatui-core-over-full-ratatui.md) | Depend on `ratatui-core`, not full Ratatui | Accepted; output revised by 0016 |
 | [0003](0003-keep-json-codec-for-now.md) | Keep the JSON codec until measurement says otherwise | Superseded by 0010 |
 | [0004](0004-two-processes-not-embedded-lisp.md) | Two OS processes, not an embedded Lisp runtime | Accepted; who spawns whom superseded by 0008 |
 | [0005](0005-stdio-as-the-default-transport.md) | stdio as the default transport | Accepted |
@@ -33,6 +33,7 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | [0013](0013-icons-and-mouse-input.md) | Icons as text, clicks counted by the relay, and every message's identity and time | Accepted |
 | [0014](0014-the-display-describes-keys.md) | The display describes keys; the relay names them | Accepted |
 | [0015](0015-font-styles-without-touching-lem.md) | Font styles without touching Lem: italic, strikethrough, dim | Accepted |
+| [0016](0016-underline-styles.md) | Underline styles, and our own terminal output | Accepted |
 
 ## Adding one
 

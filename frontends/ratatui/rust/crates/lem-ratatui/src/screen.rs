@@ -1,12 +1,10 @@
 //! What the display knows between frames, and how a frame changes it.
 
 use lem_protocol::v1::{self, CursorShape, op};
-use ratatui_core::buffer::Buffer;
-use ratatui_core::layout::{Position, Rect};
+use ratatui_core::layout::Position;
 use ratatui_core::style::Color;
-use ratatui_core::widgets::Widget;
 
-use crate::paint::{self, Styles};
+use crate::paint::{self, Layer, Styles};
 use crate::views::{Registry, View, cells};
 
 /// Every view, the session's styles, the default colours and the cursor.
@@ -48,47 +46,35 @@ impl Screen {
             op::Op::ViewResized(r) => views.resize(r.view, cells(r.width), cells(r.height)),
             op::Op::ViewCleared(c) => {
                 if let Some(vb) = views.get_mut(c.view) {
-                    paint::clear_eob(&mut vb.buffer, 0);
+                    vb.body.clear_eob(0);
                 }
             }
             op::Op::ViewsStacked(stacked) => views.stack(stacked.views),
             op::Op::Put(p) => {
-                let style = self.styles.get(p.style);
+                let paint = self.styles.get(p.style);
                 if let Some(vb) = views.get_mut(p.view) {
-                    paint::put(
-                        &mut vb.buffer,
-                        cells(p.x),
-                        cells(p.y),
-                        &p.text,
-                        cells(p.width),
-                        style,
-                    );
+                    vb.body
+                        .put(cells(p.x), cells(p.y), &p.text, cells(p.width), paint);
                 }
             }
             op::Op::LineCleared(c) => {
                 if let Some(vb) = views.get_mut(c.view) {
-                    paint::clear_eol(&mut vb.buffer, cells(c.x), cells(c.y));
+                    vb.body.clear_eol(cells(c.x), cells(c.y));
                 }
             }
             op::Op::RestCleared(c) => {
                 if let Some(vb) = views.get_mut(c.view) {
-                    paint::clear_eob(&mut vb.buffer, cells(c.y));
+                    vb.body.clear_eob(cells(c.y));
                 }
             }
             op::Op::ModelinePainted(m) => {
                 if let Some(vb) = views.get_mut(m.view) {
                     // Sent whole: the first run is the full-width blank.
-                    paint::clear_eob(&mut vb.modeline, 0);
+                    vb.modeline.clear_eob(0);
                     for run in m.runs {
-                        let style = self.styles.get(run.style);
-                        paint::put(
-                            &mut vb.modeline,
-                            cells(run.x),
-                            0,
-                            &run.text,
-                            cells(run.width),
-                            style,
-                        );
+                        let paint = self.styles.get(run.style);
+                        vb.modeline
+                            .put(cells(run.x), 0, &run.text, cells(run.width), paint);
                     }
                 }
             }
@@ -115,15 +101,15 @@ impl Screen {
     ///
     /// Done here rather than when painting, so a theme change reaches
     /// cells painted before it, and blank screen with them.
-    pub fn render_into(&self, screen: &mut Buffer) {
+    pub fn render_into(&self, screen: &mut Layer) {
         self.views.composite(screen);
         if self.foreground.is_none() && self.background.is_none() {
             return;
         }
-        let area = screen.area;
+        let area = screen.area();
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
-                let cell = &mut screen[(x, y)];
+                let cell = &mut screen.cells[(x, y)];
                 if let Some(fg) = self.foreground.filter(|_| cell.fg == Color::Reset) {
                     cell.fg = fg;
                 }
@@ -132,16 +118,6 @@ impl Screen {
                 }
             }
         }
-    }
-}
-
-/// `Frame`'s buffer is `pub(crate)`, so the only way into it is the
-/// `Widget` trait, which lives in `ratatui-core` beside the buffer. It is
-/// the one piece of Ratatui's widget system the frontend uses, and it is
-/// the trait, not the widget library (ADR 0002).
-impl Widget for &Screen {
-    fn render(self, _area: Rect, buf: &mut Buffer) {
-        self.render_into(buf);
     }
 }
 
@@ -178,10 +154,10 @@ mod tests {
         }
     }
 
-    fn render(screen: &Screen, w: u16, h: u16) -> Buffer {
-        let mut buffer = Buffer::empty(Rect::new(0, 0, w, h));
-        screen.render_into(&mut buffer);
-        buffer
+    fn render(screen: &Screen, w: u16, h: u16) -> ratatui_core::buffer::Buffer {
+        let mut layer = Layer::new(w, h);
+        screen.render_into(&mut layer);
+        layer.cells
     }
 
     #[test]

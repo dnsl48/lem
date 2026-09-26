@@ -51,11 +51,13 @@ See [`docs/adr/0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 Lem resolves its own window tree and layout before emitting anything, and
 sends absolutely-positioned paint commands in cell coordinates. So
 Ratatui's widget library and layout solver are unused — this depends on
-`ratatui-core` for `Buffer`/`Cell`/`Style` and `ratatui-crossterm` for the
-backend, and nothing else. Calling it a crossterm frontend that borrows
-Ratatui's cell buffer is more honest.
+`ratatui-core` for `Buffer`/`Cell`/`Style` and its diff, and nothing
+else. The display writes to the terminal itself, with crossterm, because
+Ratatui's own output cannot draw curly or dotted underlines. Calling it a
+crossterm frontend that borrows Ratatui's cell buffer is more honest.
 
-See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md).
+See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md) and
+[`0016`](docs/adr/0016-underline-styles.md).
 
 ## Layout
 
@@ -90,7 +92,8 @@ rust/
   Cargo.toml                 workspace
   crates/
     lem-protocol/            wire types + codec; no TTY, unit-testable
-    lem-ratatui/             the display: transport, compositing, input
+    lem-ratatui/             the display: transport, compositing, input,
+                             and its own terminal output (present.rs)
     lem-ratatui-launcher/    the OS-facing binary: starts and connects
                              both halves; embeds them for `make dist`
 docs/
@@ -281,7 +284,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 11 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 12 checks
 ```
 
 ## Next steps
@@ -319,6 +322,15 @@ definition, `(define-attribute my-attribute (t :foreground "#aaaaaa"
 (push '(lem:syntax-comment-attribute :italic :dim)
       lem-ratatui/font-styles:*attribute-font-styles*)
 ```
+
+**Underline styles.** LSP diagnostics and Lisp compiler notes get a curly
+underline, in terminals that draw one: kitty, WezTerm, foot, Alacritty,
+Ghostty, iTerm2 and VTE-based ones (GNOME Terminal and others). Elsewhere,
+and inside tmux or screen, they are underlined straight, as before.
+`LEM_RATATUI_UNDERCURL=1` or `0` overrides the detection. Any attribute can
+ask for `(:underline-style :curly)`, `:dotted`, `:dashed` or `:double` in
+the same list, or with `:plist '(:underline-style :dotted)`
+([ADR 0016](docs/adr/0016-underline-styles.md)).
 
 **C-]** interrupts the editor when it is busy (`abort`), as in the ncurses
 and browser frontends. C-g is an ordinary key, so `keyboard-quit` works as

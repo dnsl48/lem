@@ -13,21 +13,22 @@ mod golden;
 mod input;
 mod metrics;
 mod paint;
+mod present;
 mod screen;
+mod support;
 mod term;
 mod transport;
 mod views;
 
-use std::io::Write;
+use std::io::BufWriter;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{self, Event, KeyEventKind};
-use lem_protocol::v1::{self, CursorShape, to_display, to_editor};
-use ratatui_core::terminal::Terminal;
-use ratatui_crossterm::CrosstermBackend;
+use lem_protocol::v1::{self, to_display, to_editor};
+use paint::Layer;
+use present::Presenter;
 use screen::Screen;
 
 /// Size reported when there is no terminal to measure: headless runs and
@@ -40,14 +41,6 @@ fn display_size(interactive: bool) -> (u16, u16) {
         crossterm::terminal::size().unwrap_or(HEADLESS_SIZE)
     } else {
         HEADLESS_SIZE
-    }
-}
-
-fn cursor_style(shape: CursorShape) -> SetCursorStyle {
-    match shape {
-        CursorShape::Bar => SetCursorStyle::SteadyBar,
-        CursorShape::Underline => SetCursorStyle::SteadyUnderScore,
-        CursorShape::Box | CursorShape::Unspecified => SetCursorStyle::SteadyBlock,
     }
 }
 
@@ -68,23 +61,23 @@ fn main() -> Result<()> {
     // must outlive the draw loop. Matched by reference — consuming it here
     // would restore the terminal before the first frame is painted.
     let guard = term::Guard::new_if_interactive()?;
-    let mut tty = match &guard {
-        Some(guard) => Some(guard.writer()?),
-        None => None,
-    };
-    let mut terminal = match &guard {
-        Some(guard) => Some(Terminal::new(CrosstermBackend::new(guard.writer()?))?),
+    let styled_underlines = support::styled_underlines(|name| std::env::var(name).ok());
+    let mut presenter = match &guard {
+        Some(guard) => Some(Presenter::new(
+            BufWriter::new(guard.writer()?),
+            styled_underlines,
+        )),
         None => None,
     };
 
     // Lem must be told the real geometry, not an assumed 80x24, or every
-    // frame is laid out for the wrong screen.
-    let (width, height) = display_size(guard.is_some());
+    // frame is laid out for the wrong screen. Kept up to date from resize
+    // events: each frame is composited at this size.
+    let (mut width, mut height) = display_size(guard.is_some());
 
     let (mut reader, mut writer) = transport::stdio(started);
     let mut clipboard = clipboard::Clipboard::new();
     let mut screen = Screen::default();
-    let mut shape = None;
 
     // The reader blocks, and the main loop must also watch the terminal,
     // so reading moves to its own thread and arrives as messages.
@@ -125,7 +118,7 @@ fn main() -> Result<()> {
 
     loop {
         // Input first, so a keystroke is never delayed behind a frame.
-        if terminal.is_some() && event::poll(Duration::from_millis(10))? {
+        if presenter.is_some() && event::poll(Duration::from_millis(10))? {
             let message = match event::read()? {
                 // Press only: under the kitty protocol and on Windows,
                 // releases and repeats arrive too and would double every
@@ -136,10 +129,13 @@ fn main() -> Result<()> {
                 Event::Mouse(mouse) => Some(to_editor::Message::Mouse(input::mouse(mouse))),
                 Event::Paste(text) => Some(to_editor::Message::Paste(v1::Paste { text })),
                 // Lem lays out again and repaints (lem:update-on-display-resized).
-                Event::Resize(columns, rows) => Some(to_editor::Message::Resize(v1::Resize {
-                    width: u32::from(columns),
-                    height: u32::from(rows),
-                })),
+                Event::Resize(columns, rows) => {
+                    (width, height) = (columns, rows);
+                    Some(to_editor::Message::Resize(v1::Resize {
+                        width: u32::from(columns),
+                        height: u32::from(rows),
+                    }))
+                }
                 _ => None,
             };
             if let Some(message) = message {
@@ -166,29 +162,16 @@ fn main() -> Result<()> {
                     metrics.record(bytes, decode);
                     screen.apply(frame);
                     frames += 1;
-                    let Some(terminal) = terminal.as_mut() else {
+                    let Some(presenter) = presenter.as_mut() else {
                         // Headless: nothing to draw to, so report what the
                         // frame would have painted and stop.
                         eprintln!("lem-ratatui: {} views composited", screen.views.len());
                         eprintln!("lem-ratatui: {}", metrics.report());
                         return Ok(());
                     };
-                    // The cursor's shape goes out before the frame, which
-                    // shows the cursor where Lem's is, or hides it.
-                    let wanted = screen.cursor_shape();
-                    if wanted != shape {
-                        if let (Some(tty), Some(wanted)) = (tty.as_mut(), wanted) {
-                            crossterm::execute!(tty, cursor_style(wanted))?;
-                            tty.flush()?;
-                        }
-                        shape = wanted;
-                    }
-                    terminal.draw(|frame| {
-                        frame.render_widget(&screen, frame.area());
-                        if let Some(position) = screen.cursor_position() {
-                            frame.set_cursor_position(position);
-                        }
-                    })?;
+                    let mut layer = Layer::new(width, height);
+                    screen.render_into(&mut layer);
+                    presenter.present(&layer, screen.cursor_position(), screen.cursor_shape())?;
                 }
                 // The relay waits only 0.1s for this, so it is answered
                 // inline rather than handed to a thread.
@@ -202,7 +185,7 @@ fn main() -> Result<()> {
                 Some(to_display::Message::Exit(exit)) => {
                     // Restore the terminal before saying why, so it can
                     // be read.
-                    drop(terminal);
+                    drop(presenter);
                     drop(guard);
                     if !exit.reason.is_empty() {
                         eprintln!("lem-ratatui: {}", exit.reason);

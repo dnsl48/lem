@@ -158,6 +158,30 @@ check(11, "Markdown emphasis is drawn in italic",
       f"SGR 3 sent: {'\x1b[3m' in drawn}")
 s.kill()
 
+# --- 12: underline styles reach the terminal, or fall back ---------------
+# A scratch LEM_HOME whose init.lisp marks Markdown links curly, as a user
+# would (ADR 0016). Forced on, the link is drawn with SGR 4:3; forced off,
+# as for a terminal not known to draw it, with a plain SGR 4.
+home = "/tmp/lem-accept-undercurl/"
+os.makedirs(home, exist_ok=True)
+with open(os.path.join(home, "init.lisp"), "w") as f:
+    f.write("#+lem-ratatui\n(push '(lem:document-link-attribute (:underline-style :curly))\n"
+            "      lem-ratatui/font-styles:*attribute-font-styles*)\n")
+with open("/tmp/lem-accept-link.md", "w") as f:
+    f.write("see [a link](https://example.com) here\n")
+def link_drawn(forced):
+    s = Session(env={"LEM_HOME": home, "LEM_RATATUI_UNDERCURL": forced}); s.pump(8)
+    m = s.mark()
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)
+    s.send("/tmp/lem-accept-link.md"); s.send([b"\r"]); s.pump(3)
+    drawn = s.since(m)
+    s.kill()
+    return drawn
+curly, straight = link_drawn("1"), link_drawn("0")
+check(12, "a curly underline reaches the terminal, and falls back to straight",
+      "\x1b[4:3m" in curly and "\x1b[4:" not in straight and "\x1b[4m" in straight,
+      f"curly: {'\x1b[4:3m' in curly}; fallback straight: {'\x1b[4m' in straight and '\x1b[4:' not in straight}")
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")
