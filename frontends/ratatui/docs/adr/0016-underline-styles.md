@@ -1,6 +1,8 @@
 # 0016. Underline styles, and our own terminal output
 
-**Status:** Accepted — September 2026
+**Status:** Accepted — September 2026; revised by
+[0017](0017-font-styles-and-links-in-lem-attributes.md): the underline
+style is a slot of Lem's attribute, not a property-list key.
 **Revises:** [0002](0002-ratatui-core-over-full-ratatui.md): `ratatui-core`
 stays; `ratatui-crossterm` and Ratatui's `Terminal` go.
 
@@ -82,4 +84,4 @@ can show.**
   its diff, stay. If Ratatui gains underline styles, `present.rs` and
   the grid can go, and `Terminal` can come back.
 - Hyperlinks (OSC 8) stay deferred (0015). They would ride on the same
-  presenter, but need a URL with the text, not a style.
+  presenter, but need a URL with the text, not a style. (Done: 0018.)

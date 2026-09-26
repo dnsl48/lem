@@ -9,8 +9,13 @@
 //!
 //! The writing follows `ratatui-crossterm`'s: move only when not already
 //! there, then change only what differs from the cell before.
+//!
+//! Links (ADR 0018) live beside the buffer the same way, and are written
+//! as OSC 8 hyperlinks: opened where a linked run starts, closed where it
+//! ends and at the end of every frame, so nothing else is ever linked.
 
 use std::collections::BTreeSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, Write};
 
 use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
@@ -26,13 +31,14 @@ use ratatui_core::layout::Position;
 use ratatui_core::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
-use crate::paint::Layer;
+use crate::paint::{Layer, Link};
 
 /// Writes frames to the terminal, each as the difference from the last.
 pub struct Presenter<W: Write> {
     out: W,
     previous: Option<Layer>,
     styled_underlines: bool,
+    hyperlinks: bool,
     shape: Option<CursorShape>,
 }
 
@@ -45,8 +51,16 @@ impl<W: Write> Presenter<W> {
             out,
             previous: None,
             styled_underlines,
+            hyperlinks: false,
             shape: None,
         }
+    }
+
+    /// Whether the terminal makes hyperlinks of OSC 8
+    /// (`support::hyperlinks`); when not, linked text is drawn as plain.
+    pub fn with_hyperlinks(mut self, hyperlinks: bool) -> Self {
+        self.hyperlinks = hyperlinks;
+        self
     }
 
     /// Put `frame` on the terminal, then the cursor: shown at `cursor`
@@ -90,6 +104,7 @@ impl<W: Write> Presenter<W> {
         let mut underline_color = Color::Reset;
         let mut modifier = Modifier::empty();
         let mut underline: Option<UnderlineStyle> = None;
+        let mut link: Option<&Link> = None;
         let mut next: Option<(u16, u16)> = None;
 
         for &(x, y) in positions {
@@ -105,7 +120,7 @@ impl<W: Write> Presenter<W> {
             let wanted = cell
                 .modifier
                 .contains(Modifier::UNDERLINED)
-                .then(|| frame.underline.get(x, y));
+                .then(|| *frame.underline.get(x, y));
             if wanted != underline {
                 let attribute = self.underline_attribute(wanted);
                 queue!(self.out, SetAttribute(attribute))?;
@@ -119,6 +134,11 @@ impl<W: Write> Presenter<W> {
                 queue!(self.out, SetBackgroundColor(crossterm_color(cell.bg)))?;
                 bg = cell.bg;
             }
+            let wanted = frame.link.get(x, y).as_ref().filter(|_| self.hyperlinks);
+            if wanted != link {
+                queue_hyperlink(&mut self.out, wanted)?;
+                link = wanted;
+            }
             if cell.underline_color != underline_color {
                 queue!(
                     self.out,
@@ -128,6 +148,9 @@ impl<W: Write> Presenter<W> {
             }
             queue!(self.out, Print(cell.symbol()))?;
             next = Some((x.saturating_add(cell_width(cell)), y));
+        }
+        if link.is_some() {
+            queue_hyperlink(&mut self.out, None)?;
         }
         queue!(
             self.out,
@@ -156,8 +179,26 @@ fn cell_width(cell: &Cell) -> u16 {
     u16::try_from(cell.symbol().width()).unwrap_or(1).max(1)
 }
 
-/// Every position to redraw, in row order: what Ratatui's diff finds, and
-/// underlined cells whose underline style changed, which it cannot see.
+/// Open a hyperlink to `link`, or close the one open (OSC 8).
+///
+/// The `id` is the URL's hash, so a URL Lem wrapped over two rows is one
+/// link to the terminal, highlighted whole on hover. The URL was checked
+/// to be printable ASCII (`paint::link_of`), so it cannot end the
+/// sequence early.
+fn queue_hyperlink(out: &mut impl Write, link: Option<&Link>) -> io::Result<()> {
+    match link {
+        Some(url) => {
+            let mut hasher = DefaultHasher::new();
+            url.hash(&mut hasher);
+            write!(out, "\x1b]8;id={:x};{url}\x1b\\", hasher.finish())
+        }
+        None => write!(out, "\x1b]8;;\x1b\\"),
+    }
+}
+
+/// Every position to redraw, in row order: what Ratatui's diff finds,
+/// underlined cells whose underline style changed, and cells whose link
+/// changed, neither of which it can see.
 /// A cell covered by the wide character to its left is not a position of
 /// its own: printing it would split that character.
 fn changed(previous: &Layer, frame: &Layer) -> Vec<(u16, u16)> {
@@ -176,7 +217,9 @@ fn changed(previous: &Layer, frame: &Layer) -> Vec<(u16, u16)> {
                 || previous.cells[(x, y)]
                     .modifier
                     .contains(Modifier::UNDERLINED);
-            if underlined && previous.underline.get(x, y) != frame.underline.get(x, y) {
+            if (underlined && previous.underline.get(x, y) != frame.underline.get(x, y))
+                || previous.link.get(x, y) != frame.link.get(x, y)
+            {
                 positions.insert((y, x));
             }
             x = x.saturating_add(cell_width(cell));
@@ -303,7 +346,7 @@ mod tests {
 
     #[test]
     fn a_curly_underline_is_sgr_4_3() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         let out = written(
             &mut presenter,
             &frame_with("err", underlined(UnderlineStyle::Curly)),
@@ -321,7 +364,7 @@ mod tests {
             (UnderlineStyle::Dotted, "\x1b[4:4m"),
             (UnderlineStyle::Dashed, "\x1b[4:5m"),
         ] {
-            let mut presenter = Presenter::new(Vec::new(), true);
+            let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
             let out = written(&mut presenter, &frame_with("x", underlined(style)));
             assert!(out.contains(sgr), "{style:?}: {out:?}");
         }
@@ -341,7 +384,7 @@ mod tests {
     #[test]
     fn a_change_of_underline_style_alone_is_redrawn() {
         // Ratatui's diff cannot see it: the cells are identical.
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         written(
             &mut presenter,
             &frame_with("err", underlined(UnderlineStyle::Straight)),
@@ -356,7 +399,7 @@ mod tests {
 
     #[test]
     fn an_unchanged_frame_writes_no_cells() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         let frame = frame_with("same", underlined(UnderlineStyle::Curly));
         written(&mut presenter, &frame);
         let out = written(&mut presenter, &frame);
@@ -365,7 +408,7 @@ mod tests {
 
     #[test]
     fn nothing_writes_blink_or_hidden() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         let out = written(
             &mut presenter,
             &frame_with("err", underlined(UnderlineStyle::Curly)),
@@ -377,7 +420,7 @@ mod tests {
 
     #[test]
     fn a_wide_character_is_not_split_by_an_underline_change() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         written(
             &mut presenter,
             &frame_with("日", underlined(UnderlineStyle::Straight)),
@@ -394,7 +437,7 @@ mod tests {
 
     #[test]
     fn the_cursor_is_shown_where_asked_and_shaped() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         presenter
             .present(
                 &Layer::new(4, 2),
@@ -409,9 +452,75 @@ mod tests {
 
     #[test]
     fn a_new_size_starts_from_a_cleared_screen() {
-        let mut presenter = Presenter::new(Vec::new(), true);
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         written(&mut presenter, &Layer::new(4, 2));
         let out = written(&mut presenter, &Layer::new(6, 3));
         assert!(out.contains("\x1b[2J"), "{out:?}");
+    }
+
+    fn linked(text: &str, url: &str) -> Layer {
+        let mut layer = Layer::new(10, 2);
+        let link = crate::paint::link_of(url);
+        layer.put_linked(
+            2,
+            0,
+            text,
+            text.chars().count() as u16,
+            Paint::default(),
+            link.as_ref(),
+        );
+        layer
+    }
+
+    #[test]
+    fn a_link_is_opened_before_its_text_and_closed_after() {
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
+        let out = written(&mut presenter, &linked("site", "https://example.com"));
+        let open = out.find("\x1b]8;id=").expect("opened");
+        let url = out
+            .find(";https://example.com\x1b\\")
+            .expect("with its URL");
+        let text = out.find("site").unwrap();
+        let close = out.rfind("\x1b]8;;\x1b\\").expect("closed");
+        assert!(open < url && url < text && text < close, "{out:?}");
+        assert_eq!(out.matches("\x1b]8;").count(), 2, "one link: {out:?}");
+    }
+
+    #[test]
+    fn without_support_no_link_is_written() {
+        let mut presenter = Presenter::new(Vec::new(), true);
+        let out = written(&mut presenter, &linked("site", "https://example.com"));
+        assert!(out.contains("site"));
+        assert!(!out.contains("\x1b]8;"), "{out:?}");
+    }
+
+    #[test]
+    fn a_change_of_link_alone_is_redrawn() {
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
+        written(&mut presenter, &linked("site", "https://a.example"));
+        let out = written(&mut presenter, &linked("site", "https://b.example"));
+        assert!(out.contains("https://b.example"), "{out:?}");
+        assert!(out.contains("site"), "{out:?}");
+        let out = written(&mut presenter, &frame_with("  site", Paint::default()));
+        assert!(out.contains("site"), "unlinked, redrawn: {out:?}");
+        assert!(!out.contains("https://"), "{out:?}");
+    }
+
+    #[test]
+    fn a_wrapped_url_is_one_link_to_the_terminal() {
+        let url = "https://example.com/long";
+        let link = crate::paint::link_of(url);
+        let mut frame = Layer::new(8, 2);
+        frame.put_linked(4, 0, "http", 4, Paint::default(), link.as_ref());
+        frame.put_linked(0, 1, "s://", 4, Paint::default(), link.as_ref());
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
+        let out = written(&mut presenter, &frame);
+        let ids: Vec<&str> = out
+            .split("\x1b]8;id=")
+            .skip(1)
+            .map(|rest| rest.split(';').next().unwrap())
+            .collect();
+        assert!(!ids.is_empty(), "{out:?}");
+        assert!(ids.iter().all(|id| *id == ids[0]), "{ids:?}");
     }
 }

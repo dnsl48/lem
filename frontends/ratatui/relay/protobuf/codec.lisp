@@ -153,12 +153,14 @@ NEW-STYLES for the frame to define."
       (views-stacked
        (pb:make-op :views-stacked (pb:make-views-stacked :views (views-stacked-views op))))
       (text-put
-       (pb:make-op :put (pb:make-put :view (text-put-view op)
-                                     :x (text-put-x op)
-                                     :y (text-put-y op)
-                                     :text (text-put-text op)
-                                     :width (text-put-width op)
-                                     :style (style (text-put-style op)))))
+       (pb:make-op :put (apply #'pb:make-put
+                               :view (text-put-view op)
+                               :x (text-put-x op)
+                               :y (text-put-y op)
+                               :text (text-put-text op)
+                               :width (text-put-width op)
+                               :style (style (text-put-style op))
+                               (optionals :link (text-put-link op)))))
       (line-cleared
        (pb:make-op :line-cleared (pb:make-line-cleared :view (op-view op)
                                                        :x (line-cleared-x op)

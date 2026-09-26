@@ -1,6 +1,7 @@
 # 0015. Font styles without touching Lem: italic, strikethrough, dim
 
-**Status:** Accepted — September 2026
+**Status:** Superseded by [0017](0017-font-styles-and-links-in-lem-attributes.md)
+— the styles are now slots of Lem's attribute. Accepted — September 2026
 **Supersedes:** [0012](0012-the-relay-frame-model.md)'s follow-up, "Italic
 … needs a core change".
 
@@ -70,7 +71,7 @@ list, all within `frontends/ratatui`.**
 - **Underline styles and hyperlinks are deferred.** Both need display
   work outside Ratatui's model, not a flag. Both can join v1 later without
   breaking anything: an optional underline style on `Style`, an optional
-  URL on `Put`.
+  URL on `Put`. (Both done: 0016 and 0018.)
 
 ## Consequences
 
