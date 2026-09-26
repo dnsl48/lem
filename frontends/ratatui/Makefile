@@ -3,7 +3,7 @@
 #   make          build everything and the dist/lem-ratatui-dev script
 #   make run      launch it against a scratch LEM_HOME
 #   make dist     one self-contained binary, dist/lem-ratatui
-#   make test     Rust unit tests
+#   make test     Rust and Lisp unit tests (Lisp needs Roswell for rove)
 #   make clean    remove everything this file builds
 #
 # Works from any directory: `make -C frontends/ratatui` from the repo root
@@ -27,10 +27,10 @@ QLOT_SETUP := $(ROOT)/.qlot/setup.lisp
 # The Lisp half is a saved image, so any Lisp source that ends up in it
 # must trigger a rebuild, not just this frontend's own files.
 LISP_SOURCES := $(HERE)/build.lisp $(HERE)/lem-ratatui.asd \
-	$(shell find $(HERE)/lisp $(ROOT)/src $(ROOT)/extensions $(ROOT)/frontends/server \
+	$(shell find $(HERE)/lisp $(HERE)/relay $(ROOT)/src $(ROOT)/extensions $(ROOT)/frontends/server \
 		-name '*.lisp' -o -name '*.asd')
 
-.PHONY: all lisp rust dist run test clean
+.PHONY: all lisp rust dist run test test-rust test-lisp clean
 
 all: $(LAUNCHER)
 
@@ -72,8 +72,13 @@ run: all
 	mkdir -p $(LEM_HOME)
 	LEM_HOME=$(LEM_HOME) $(LAUNCHER)
 
-test:
+test: test-rust test-lisp
+
+test-rust:
 	cd $(HERE)/rust && $(CARGO) test
+
+test-lisp: $(QLOT_SETUP)
+	cd $(ROOT) && .qlot/bin/rove frontends/ratatui/relay/lem-relay.asd
 
 clean:
 	rm -rf $(HERE)/dist
