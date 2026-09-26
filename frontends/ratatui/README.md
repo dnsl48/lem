@@ -79,10 +79,14 @@ relay/                       lem-relay (ADR 0009, 0012)
   tests/                     Rove tests, run by `make test`
 proto/lem/relay/v1/
   relay.proto                the protocol's one schema (ADR 0010-0014)
+proto/fixtures/              golden messages both halves decode, each with
+                             a text twin: relay-session (Lisp → Rust) and
+                             display-inputs (Rust → Lisp)
 scripts/
   acceptance.py              the acceptance checks, driven through a pty
   workload.py                the fixed workload's frames and bytes
-  capture-relay-json.lisp    regenerates lem-protocol's relay fixture
+  capture-relay-json.lisp    regenerates lem-protocol's JSON relay fixture
+  capture-relay-v1.lisp      regenerates proto/fixtures/relay-session.v1.*
 rust/
   Cargo.toml                 workspace
   crates/

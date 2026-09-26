@@ -7,6 +7,8 @@
 //! `lem-ratatui-launcher`'s job, not this one's.
 
 mod clipboard;
+#[cfg(test)]
+mod golden;
 mod input;
 mod metrics;
 mod paint;
