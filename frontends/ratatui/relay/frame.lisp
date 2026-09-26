@@ -10,6 +10,12 @@
    :style-reverse
    :style-underline
    :style-cursor
+   :style-italic
+   :style-strikethrough
+   :style-dim
+   :style-with-background
+   :mark-font-styles
+   :*font-style-keys*
    :attribute-style
    :pack-color
    ;; Ops: what a frame asks the display to do.
@@ -93,22 +99,45 @@
    :finish-frame))
 (in-package :lem-relay/frame)
 
+(defparameter *font-style-keys* '(:italic :strikethrough :dim)
+  "The keys in a Lem attribute's property list the relay reads as font
+styles (ADR 0015). Lem's attribute has no slots for them; the property
+list carries them through merging and theme loads.")
+
 ;;; Styles
 
 (defstruct (style (:constructor make-style
-                      (&key foreground background bold reverse underline cursor)))
+                      (&key foreground background bold reverse underline cursor
+                         italic strikethrough dim)))
   "A Lem attribute reduced to what the display shows (ADR 0012).
 
 Colours are packed #xRRGGBB integers, or NIL for the default colour (see
 `defaults'). UNDERLINE is NIL, T, or a packed colour. CURSOR marks a cell
-painted as a cursor. Styles compare by content: equal slots are the same
-style, however many Lem attribute objects produced them."
+painted as a cursor. ITALIC, STRIKETHROUGH and DIM come from the
+attribute's property list (ADR 0015). Styles compare by content: equal
+slots are the same style, however many Lem attribute objects produced
+them."
   (foreground nil :read-only t)
   (background nil :read-only t)
   (bold nil :read-only t)
   (reverse nil :read-only t)
   (underline nil :read-only t)
-  (cursor nil :read-only t))
+  (cursor nil :read-only t)
+  (italic nil :read-only t)
+  (strikethrough nil :read-only t)
+  (dim nil :read-only t))
+
+(defun style-with-background (style background)
+  "STYLE with BACKGROUND in place of its own, every other slot kept."
+  (make-style :foreground (style-foreground style)
+              :background background
+              :bold (style-bold style)
+              :reverse (style-reverse style)
+              :underline (style-underline style)
+              :cursor (style-cursor style)
+              :italic (style-italic style)
+              :strikethrough (style-strikethrough style)
+              :dim (style-dim style)))
 
 (defun pack-color (color)
   "COLOR, a Lem colour struct or anything `lem:parse-color' reads, as
@@ -131,7 +160,30 @@ Every colour spelling Lem accepts becomes one packed integer, as
                   :bold (and (lem:attribute-bold attribute) t)
                   :reverse (and (lem:attribute-reverse attribute) t)
                   :underline (and underline (or (pack-color underline) t))
-                  :cursor (and (lem:cursor-attribute-p attribute) t)))))
+                  :cursor (and (lem:cursor-attribute-p attribute) t)
+                  :italic (and (lem:attribute-value attribute :italic) t)
+                  :strikethrough (and (lem:attribute-value attribute :strikethrough) t)
+                  :dim (and (lem:attribute-value attribute :dim) t)))))
+
+(defun mark-font-styles (entries)
+  "Set font styles on named Lem attributes. ENTRIES is a list of
+(ATTRIBUTE-NAME KEY...), each KEY one of `*font-style-keys*':
+
+  ((lem:document-italic-attribute :italic)
+   (lem:syntax-comment-attribute :italic :dim))
+
+Marks the attribute objects Lem holds now. A theme load rebuilds them,
+so call this after every one (`lem:*after-load-theme-hook*'). An
+attribute not defined is skipped. Returns how many were marked."
+  (loop :for (name . keys) :in entries
+        :for attribute := (lem:ensure-attribute name nil)
+        :when attribute
+          :count (progn
+                   (dolist (key keys)
+                     (unless (member key *font-style-keys*)
+                       (error "~S is not a font style: one of ~S." key *font-style-keys*))
+                     (setf (lem:attribute-value attribute key) t))
+                   t)))
 
 ;;; Ops
 

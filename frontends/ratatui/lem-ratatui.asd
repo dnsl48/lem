@@ -10,4 +10,5 @@
   :pathname "lisp/"
   :components ((:file "implementation")
                (:file "transport")
+               (:file "font-styles")
                (:file "main")))

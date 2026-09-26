@@ -79,7 +79,9 @@ last one, in order, then state.
   frame the frame multiplexer switched away from off the screen.
 - **Styles** are defined in the first frame that uses each, by id, and
   are stable for the session; 0 is no style. Colours are packed
-  `0xRRGGBB`, and an absent colour means the default, not black.
+  `0xRRGGBB`, and an absent colour means the default, not black. Italic,
+  strikethrough and dim come from the attribute's property list
+  (ADR 0015).
 - **`Defaults`** come in the first frame and whenever a theme changes
   them. The display fills every unset colour with them when compositing,
   so a theme change reaches cells painted before it.
