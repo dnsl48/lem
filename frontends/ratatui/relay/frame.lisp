@@ -13,6 +13,8 @@
    :style-italic
    :style-strikethrough
    :style-dim
+   :style-underline-style
+   :*underline-styles*
    :style-with-background
    :mark-font-styles
    :*font-style-keys*
@@ -104,17 +106,22 @@
 styles (ADR 0015). Lem's attribute has no slots for them; the property
 list carries them through merging and theme loads.")
 
+(defparameter *underline-styles* '(:curly :dotted :dashed :double)
+  "The values of `:underline-style' in a Lem attribute's property list
+(ADR 0016). Absent, or anything else, is a straight underline.")
+
 ;;; Styles
 
 (defstruct (style (:constructor make-style
                       (&key foreground background bold reverse underline cursor
-                         italic strikethrough dim)))
+                         italic strikethrough dim underline-style)))
   "A Lem attribute reduced to what the display shows (ADR 0012).
 
 Colours are packed #xRRGGBB integers, or NIL for the default colour (see
 `defaults'). UNDERLINE is NIL, T, or a packed colour. CURSOR marks a cell
 painted as a cursor. ITALIC, STRIKETHROUGH and DIM come from the
-attribute's property list (ADR 0015). Styles compare by content: equal
+attribute's property list (ADR 0015), as does UNDERLINE-STYLE, one of
+`*underline-styles*' or NIL for straight (ADR 0016). Styles compare by content: equal
 slots are the same style, however many Lem attribute objects produced
 them."
   (foreground nil :read-only t)
@@ -125,7 +132,8 @@ them."
   (cursor nil :read-only t)
   (italic nil :read-only t)
   (strikethrough nil :read-only t)
-  (dim nil :read-only t))
+  (dim nil :read-only t)
+  (underline-style nil :read-only t))
 
 (defun style-with-background (style background)
   "STYLE with BACKGROUND in place of its own, every other slot kept."
@@ -137,7 +145,8 @@ them."
               :cursor (style-cursor style)
               :italic (style-italic style)
               :strikethrough (style-strikethrough style)
-              :dim (style-dim style)))
+              :dim (style-dim style)
+              :underline-style (style-underline-style style)))
 
 (defun pack-color (color)
   "COLOR, a Lem colour struct or anything `lem:parse-color' reads, as
@@ -163,14 +172,18 @@ Every colour spelling Lem accepts becomes one packed integer, as
                   :cursor (and (lem:cursor-attribute-p attribute) t)
                   :italic (and (lem:attribute-value attribute :italic) t)
                   :strikethrough (and (lem:attribute-value attribute :strikethrough) t)
-                  :dim (and (lem:attribute-value attribute :dim) t)))))
+                  :dim (and (lem:attribute-value attribute :dim) t)
+                  :underline-style (find (lem:attribute-value attribute :underline-style)
+                                         *underline-styles*)))))
 
 (defun mark-font-styles (entries)
   "Set font styles on named Lem attributes. ENTRIES is a list of
-(ATTRIBUTE-NAME KEY...), each KEY one of `*font-style-keys*':
+(ATTRIBUTE-NAME STYLE...), each STYLE one of `*font-style-keys*', or
+(:underline-style S) with S one of `*underline-styles*':
 
   ((lem:document-italic-attribute :italic)
-   (lem:syntax-comment-attribute :italic :dim))
+   (lem:syntax-comment-attribute :italic :dim)
+   (lem:compiler-note-attribute (:underline-style :curly)))
 
 Marks the attribute objects Lem holds now. A theme load rebuilds them,
 so call this after every one (`lem:*after-load-theme-hook*'). An
@@ -180,9 +193,14 @@ attribute not defined is skipped. Returns how many were marked."
         :when attribute
           :count (progn
                    (dolist (key keys)
-                     (unless (member key *font-style-keys*)
-                       (error "~S is not a font style: one of ~S." key *font-style-keys*))
-                     (setf (lem:attribute-value attribute key) t))
+                     (cond ((member key *font-style-keys*)
+                            (setf (lem:attribute-value attribute key) t))
+                           ((and (consp key) (eq :underline-style (first key))
+                                 (member (second key) *underline-styles*))
+                            (setf (lem:attribute-value attribute :underline-style) (second key)))
+                           (t
+                            (error "~S is not a font style: one of ~S, or (:underline-style S) with S one of ~S."
+                                   key *font-style-keys* *underline-styles*))))
                    t)))
 
 ;;; Ops

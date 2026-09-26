@@ -7,6 +7,7 @@
 //   0012  the relay's frame model: what a frame holds
 //   0013  icons, mouse, clicks; every message's identity and time
 //   0014  the display describes keys; the relay names them
+//   0015  font styles; 0016 underline styles
 //
 // Transport: the launcher's pipes, stdio (ADR 0005). Each message is one
 // ToDisplay or ToEditor, framed with protobuf's standard length-delimited
@@ -149,6 +150,18 @@ message Style {
   bool italic = 9;
   bool strikethrough = 10;
   bool dim = 11;
+  // How an underline is drawn, from the attribute's :underline-style
+  // (ADR 0016). What Lem wants: a display draws a style its terminal
+  // cannot as a straight underline.
+  UnderlineStyle underline_style = 12;
+}
+
+enum UnderlineStyle {
+  UNDERLINE_STYLE_STRAIGHT = 0;
+  UNDERLINE_STYLE_CURLY = 1;
+  UNDERLINE_STYLE_DOTTED = 2;
+  UNDERLINE_STYLE_DASHED = 3;
+  UNDERLINE_STYLE_DOUBLE = 4;
 }
 
 message Cursor {

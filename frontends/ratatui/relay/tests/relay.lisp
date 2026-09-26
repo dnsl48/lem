@@ -145,7 +145,14 @@ editors have run in one process, as tests do, the two can be different
     (ok (lem:attribute-value (lem:ensure-attribute 'test-italic-attribute) :italic))))
 
 (deftest only-font-styles-can-be-marked
-  (ok (signals (mark-font-styles '((test-italic-attribute :bold))))))
+  (ok (signals (mark-font-styles '((test-italic-attribute :bold)))))
+  (ok (signals (mark-font-styles '((test-italic-attribute (:underline-style :wavy)))))))
+
+(deftest an-underline-style-can-be-marked
+  (with-editor (relay)
+    (mark-font-styles '((test-italic-attribute (:underline-style :curly))))
+    (ok (eq :curly (lem:attribute-value (lem:ensure-attribute 'test-italic-attribute)
+                                         :underline-style)))))
 
 ;;; Frame state
 
