@@ -17,11 +17,11 @@ class Session:
     `colors=(fg, bg)`, as "rrrr/gggg/bbbb" hex, OSC 10 and 11 are too:
     that is how the display learns the terminal's colours (colors.rs).
     """
-    def __init__(self, cols=100, rows=30, colors=None):
+    def __init__(self, cols=100, rows=30, colors=None, env=None):
         self.colors = colors
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            os.execve(BIN, [BIN], ENV)
+            os.execve(BIN, [BIN], dict(ENV, **(env or {})))
         self.winsize(cols, rows)
         self.out = b""
     def winsize(self, c, r):

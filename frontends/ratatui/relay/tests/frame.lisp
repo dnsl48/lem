@@ -62,6 +62,19 @@ has already gone out."
     (ok (and (style-italic style) (style-dim style) (style-cursor style)
              (= 1 (style-foreground style))))))
 
+(deftest an-underline-style-comes-from-the-property-list
+  (ok (eq :curly (style-underline-style
+                  (attribute-style (lem:make-attribute :underline t
+                                                       :plist '(:underline-style :curly))))))
+  (ok (null (style-underline-style
+             (attribute-style (lem:make-attribute :underline t :plist '(:underline-style :wavy)))))
+      "an unknown style is a straight underline")
+  (ok (null (style-underline-style (attribute-style (lem:make-attribute :underline t))))))
+
+(deftest a-background-fill-keeps-the-underline-style
+  (ok (eq :dotted (style-underline-style
+                   (style-with-background (make-style :underline t :underline-style :dotted) 2)))))
+
 ;;; Frame suppression
 
 (deftest a-frame-with-nothing-new-in-it-is-not-sent

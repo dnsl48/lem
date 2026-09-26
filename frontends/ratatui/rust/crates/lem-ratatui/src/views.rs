@@ -9,6 +9,8 @@
 
 use lem_protocol::v1::{self, BorderShape, ViewKind};
 use ratatui_core::buffer::Buffer;
+
+use crate::paint::Layer;
 use ratatui_core::layout::Rect;
 
 /// A view: where one Lem window's buffer goes on the screen.
@@ -58,8 +60,8 @@ impl From<&v1::ViewCreated> for View {
 /// it into the view buffer would overwrite the first line of the file.
 pub struct ViewBuffer {
     pub view: View,
-    pub buffer: Buffer,
-    pub modeline: Buffer,
+    pub body: Layer,
+    pub modeline: Layer,
 }
 
 /// Every live view, in creation order, and the order to composite them in.
@@ -73,18 +75,20 @@ pub struct Registry {
 }
 
 /// Copy `source` onto `screen` at (`x`, `y`), clipped to `area`.
-fn blit(screen: &mut Buffer, source: &Buffer, x: u16, y: u16, area: Rect) {
-    for sy in 0..source.area.height {
+fn blit(screen: &mut Layer, source: &Layer, x: u16, y: u16, area: Rect) {
+    let size = source.area();
+    for sy in 0..size.height {
         let Some(ty) = y.checked_add(sy) else { return };
         if ty >= area.height {
             return;
         }
-        for sx in 0..source.area.width {
+        for sx in 0..size.width {
             let Some(tx) = x.checked_add(sx) else { break };
             if tx >= area.width {
                 break;
             }
-            screen[(tx, ty)] = source[(sx, sy)].clone();
+            screen.cells[(tx, ty)] = source.cells[(sx, sy)].clone();
+            screen.underline.set(tx, ty, source.underline.get(sx, sy));
         }
     }
 }
@@ -93,8 +97,8 @@ fn blit(screen: &mut Buffer, source: &Buffer, x: u16, y: u16, area: Rect) {
 const SEPARATOR: &str = "\u{2502}";
 
 /// Copy one view and its modeline onto the screen.
-fn blit_view(screen: &mut Buffer, vb: &ViewBuffer, area: Rect) {
-    blit(screen, &vb.buffer, vb.view.x, vb.view.y, area);
+fn blit_view(screen: &mut Layer, vb: &ViewBuffer, area: Rect) {
+    blit(screen, &vb.body, vb.view.x, vb.view.y, area);
     if vb.view.modeline {
         // One row immediately below the view, not its last row.
         let y = vb.view.y.saturating_add(vb.view.height);
@@ -210,12 +214,12 @@ fn layer(kind: ViewKind) -> u8 {
 impl Registry {
     /// Add a view, replacing any existing one with the same id.
     pub fn insert(&mut self, view: View) {
-        let buffer = Buffer::empty(Rect::new(0, 0, view.width, view.height));
-        let modeline = Buffer::empty(Rect::new(0, 0, view.width, 1));
+        let body = Layer::new(view.width, view.height);
+        let modeline = Layer::new(view.width, 1);
         self.remove(view.id);
         self.views.push(ViewBuffer {
             view,
-            buffer,
+            body,
             modeline,
         });
     }
@@ -239,10 +243,6 @@ impl Registry {
         self.views.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.views.is_empty()
-    }
-
     pub fn get_mut(&mut self, id: u32) -> Option<&mut ViewBuffer> {
         self.views.iter_mut().find(|vb| vb.view.id == id)
     }
@@ -256,8 +256,8 @@ impl Registry {
         if let Some(vb) = self.get_mut(id) {
             vb.view.width = width;
             vb.view.height = height;
-            vb.buffer = Buffer::empty(Rect::new(0, 0, width, height));
-            vb.modeline = Buffer::empty(Rect::new(0, 0, width, 1));
+            vb.body = Layer::new(width, height);
+            vb.modeline = Layer::new(width, 1);
         }
     }
 
@@ -272,7 +272,7 @@ impl Registry {
     /// Blit every shown view into `screen`, in the relay's stacking
     /// order, or before it has sent one, tiles, then headers, then
     /// floating windows on top.
-    pub fn composite(&self, screen: &mut Buffer) {
+    pub fn composite(&self, screen: &mut Layer) {
         let ordered: Vec<&ViewBuffer> = match &self.stacking {
             Some(order) => order.iter().filter_map(|id| self.get(*id)).collect(),
             None => {
@@ -282,7 +282,7 @@ impl Registry {
             }
         };
 
-        let area = screen.area;
+        let area = screen.area();
 
         // Separators go on after every tile is painted, so a neighbour
         // cannot overwrite one — and before headers and floating windows,
@@ -294,13 +294,13 @@ impl Registry {
             blit_view(screen, vb, area);
         }
         for vb in &tiles {
-            draw_separator(screen, &vb.view, area);
+            draw_separator(&mut screen.cells, &vb.view, area);
         }
         for vb in &above {
             // Border first: it rings the view rather than overlapping it,
             // but drawing it first keeps a neighbouring window's content
             // from being clipped by our frame.
-            draw_border(screen, &vb.view, area);
+            draw_border(&mut screen.cells, &vb.view, area);
             blit_view(screen, vb, area);
         }
     }
@@ -326,10 +326,10 @@ mod tests {
 
     fn fill(registry: &mut Registry, id: u32, ch: char) {
         let vb = registry.get_mut(id).expect("view should exist");
-        let area = vb.buffer.area;
+        let area = vb.body.area();
         for y in 0..area.height {
             for x in 0..area.width {
-                vb.buffer[(x, y)].set_char(ch);
+                vb.body.cells[(x, y)].set_char(ch);
             }
         }
     }
@@ -342,12 +342,16 @@ mod tests {
         fill(&mut registry, 1, 't');
         fill(&mut registry, 2, 'f');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 10, 4));
+        let mut screen = Layer::new(10, 4);
         registry.composite(&mut screen);
 
-        assert_eq!(screen[(0, 0)].symbol(), "t");
-        assert_eq!(screen[(3, 1)].symbol(), "f", "floating must win");
-        assert_eq!(screen[(3, 3)].symbol(), "t", "below the floating view");
+        assert_eq!(screen.cells[(0, 0)].symbol(), "t");
+        assert_eq!(screen.cells[(3, 1)].symbol(), "f", "floating must win");
+        assert_eq!(
+            screen.cells[(3, 3)].symbol(),
+            "t",
+            "below the floating view"
+        );
     }
 
     #[test]
@@ -358,9 +362,13 @@ mod tests {
         fill(&mut registry, 2, 'f');
         fill(&mut registry, 1, 't');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 1));
+        let mut screen = Layer::new(4, 1);
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "f", "floating wins regardless");
+        assert_eq!(
+            screen.cells[(0, 0)].symbol(),
+            "f",
+            "floating wins regardless"
+        );
     }
 
     #[test]
@@ -372,9 +380,25 @@ mod tests {
         fill(&mut registry, 2, 'f');
         registry.remove(2);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let mut screen = Layer::new(6, 2);
         registry.composite(&mut screen);
-        assert_eq!(screen[(1, 0)].symbol(), "t");
+        assert_eq!(screen.cells[(1, 0)].symbol(), "t");
+    }
+
+    #[test]
+    fn compositing_carries_underline_styles() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 2, 1, 4, 1, ViewKind::Tile));
+        registry
+            .get_mut(1)
+            .unwrap()
+            .body
+            .underline
+            .set(1, 0, v1::UnderlineStyle::Curly);
+        let mut screen = Layer::new(8, 3);
+        registry.composite(&mut screen);
+        assert_eq!(screen.underline.get(3, 1), v1::UnderlineStyle::Curly);
+        assert_eq!(screen.underline.get(2, 1), v1::UnderlineStyle::Straight);
     }
 
     #[test]
@@ -387,9 +411,13 @@ mod tests {
         fill(&mut registry, 2, 'b');
         registry.stack(vec![2, 1]);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 1));
+        let mut screen = Layer::new(4, 1);
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "a", "listed last, drawn last");
+        assert_eq!(
+            screen.cells[(0, 0)].symbol(),
+            "a",
+            "listed last, drawn last"
+        );
     }
 
     #[test]
@@ -402,9 +430,9 @@ mod tests {
         fill(&mut registry, 2, 'b');
         registry.stack(vec![1]);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 1));
+        let mut screen = Layer::new(4, 1);
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "a");
+        assert_eq!(screen.cells[(0, 0)].symbol(), "a");
         assert_eq!(registry.len(), 2, "still tracked");
     }
 
@@ -421,16 +449,24 @@ mod tests {
         {
             let vb = registry.get_mut(1).unwrap();
             for x in 0..4 {
-                vb.modeline[(x, 0)].set_char('m');
+                vb.modeline.cells[(x, 0)].set_char('m');
             }
         }
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 5));
+        let mut screen = Layer::new(4, 5);
         registry.composite(&mut screen);
 
-        assert_eq!(screen[(0, 1)].symbol(), "b", "first buffer row intact");
-        assert_eq!(screen[(0, 2)].symbol(), "b", "last buffer row");
-        assert_eq!(screen[(0, 3)].symbol(), "m", "modeline below the view");
+        assert_eq!(
+            screen.cells[(0, 1)].symbol(),
+            "b",
+            "first buffer row intact"
+        );
+        assert_eq!(screen.cells[(0, 2)].symbol(), "b", "last buffer row");
+        assert_eq!(
+            screen.cells[(0, 3)].symbol(),
+            "m",
+            "modeline below the view"
+        );
     }
 
     #[test]
@@ -440,12 +476,12 @@ mod tests {
         fill(&mut registry, 1, 'b');
         {
             let vb = registry.get_mut(1).unwrap();
-            vb.modeline[(0, 0)].set_char('m');
+            vb.modeline.cells[(0, 0)].set_char('m');
         }
-        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 3));
+        let mut screen = Layer::new(4, 3);
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "b");
-        assert_eq!(screen[(0, 1)].symbol(), " ", "no modeline painted");
+        assert_eq!(screen.cells[(0, 0)].symbol(), "b");
+        assert_eq!(screen.cells[(0, 1)].symbol(), " ", "no modeline painted");
     }
 
     #[test]
@@ -458,18 +494,22 @@ mod tests {
         fill(&mut registry, 1, 'l');
         fill(&mut registry, 2, 'r');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 12, 4));
+        let mut screen = Layer::new(12, 4);
         registry.composite(&mut screen);
 
-        assert_eq!(screen[(5, 0)].symbol(), "\u{2502}", "separator column");
-        assert_eq!(screen[(5, 1)].symbol(), "\u{2502}");
         assert_eq!(
-            screen[(5, 2)].symbol(),
+            screen.cells[(5, 0)].symbol(),
+            "\u{2502}",
+            "separator column"
+        );
+        assert_eq!(screen.cells[(5, 1)].symbol(), "\u{2502}");
+        assert_eq!(
+            screen.cells[(5, 2)].symbol(),
             "\u{2502}",
             "spans the modeline row"
         );
-        assert_eq!(screen[(6, 0)].symbol(), "r", "view content untouched");
-        assert_eq!(screen[(3, 0)].symbol(), "l", "left pane untouched");
+        assert_eq!(screen.cells[(6, 0)].symbol(), "r", "view content untouched");
+        assert_eq!(screen.cells[(3, 0)].symbol(), "l", "left pane untouched");
     }
 
     #[test]
@@ -477,10 +517,10 @@ mod tests {
         let mut registry = Registry::default();
         registry.insert(view(1, 0, 0, 4, 2, ViewKind::Tile));
         fill(&mut registry, 1, 'l');
-        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let mut screen = Layer::new(6, 2);
         registry.composite(&mut screen);
         assert_eq!(
-            screen[(0, 0)].symbol(),
+            screen.cells[(0, 0)].symbol(),
             "l",
             "nothing to the left to draw in"
         );
@@ -494,14 +534,18 @@ mod tests {
         fill(&mut registry, 1, 't');
         fill(&mut registry, 2, 'f');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 2));
+        let mut screen = Layer::new(8, 2);
         registry.composite(&mut screen);
         assert_eq!(
-            screen[(2, 0)].symbol(),
+            screen.cells[(2, 0)].symbol(),
             "f",
             "floating wins over the separator"
         );
-        assert_eq!(screen[(2, 1)].symbol(), "\u{2502}", "still drawn below it");
+        assert_eq!(
+            screen.cells[(2, 1)].symbol(),
+            "\u{2502}",
+            "still drawn below it"
+        );
     }
 
     fn floating(id: u32, x: u16, y: u16, w: u16, h: u16) -> View {
@@ -518,16 +562,16 @@ mod tests {
         registry.insert(floating(1, 2, 2, 2, 1));
         fill(&mut registry, 1, 'f');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        let mut screen = Layer::new(8, 6);
         registry.composite(&mut screen);
 
-        assert_eq!(screen[(1, 1)].symbol(), "\u{256d}", "top left");
-        assert_eq!(screen[(4, 1)].symbol(), "\u{256e}", "top right");
-        assert_eq!(screen[(1, 3)].symbol(), "\u{2570}", "bottom left");
-        assert_eq!(screen[(4, 3)].symbol(), "\u{256f}", "bottom right");
-        assert_eq!(screen[(2, 1)].symbol(), "\u{2500}", "top edge");
-        assert_eq!(screen[(1, 2)].symbol(), "\u{2502}", "left edge");
-        assert_eq!(screen[(2, 2)].symbol(), "f", "content survives");
+        assert_eq!(screen.cells[(1, 1)].symbol(), "\u{256d}", "top left");
+        assert_eq!(screen.cells[(4, 1)].symbol(), "\u{256e}", "top right");
+        assert_eq!(screen.cells[(1, 3)].symbol(), "\u{2570}", "bottom left");
+        assert_eq!(screen.cells[(4, 3)].symbol(), "\u{256f}", "bottom right");
+        assert_eq!(screen.cells[(2, 1)].symbol(), "\u{2500}", "top edge");
+        assert_eq!(screen.cells[(1, 2)].symbol(), "\u{2502}", "left edge");
+        assert_eq!(screen.cells[(2, 2)].symbol(), "f", "content survives");
     }
 
     #[test]
@@ -537,12 +581,20 @@ mod tests {
         v.border_shape = BorderShape::DropCurtain;
         registry.insert(v);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        let mut screen = Layer::new(8, 6);
         registry.composite(&mut screen);
-        assert_eq!(screen[(1, 1)].symbol(), "\u{251c}", "top left tees right");
-        assert_eq!(screen[(4, 1)].symbol(), "\u{2524}", "top right tees left");
         assert_eq!(
-            screen[(1, 3)].symbol(),
+            screen.cells[(1, 1)].symbol(),
+            "\u{251c}",
+            "top left tees right"
+        );
+        assert_eq!(
+            screen.cells[(4, 1)].symbol(),
+            "\u{2524}",
+            "top right tees left"
+        );
+        assert_eq!(
+            screen.cells[(1, 3)].symbol(),
             "\u{2570}",
             "bottom corners unchanged"
         );
@@ -555,12 +607,12 @@ mod tests {
         v.border_shape = BorderShape::LeftBorder;
         registry.insert(v);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        let mut screen = Layer::new(8, 6);
         registry.composite(&mut screen);
-        assert_eq!(screen[(1, 2)].symbol(), "\u{2502}");
-        assert_eq!(screen[(1, 3)].symbol(), "\u{2502}");
-        assert_eq!(screen[(1, 1)].symbol(), " ", "no box above");
-        assert_eq!(screen[(4, 2)].symbol(), " ", "nothing on the right");
+        assert_eq!(screen.cells[(1, 2)].symbol(), "\u{2502}");
+        assert_eq!(screen.cells[(1, 3)].symbol(), "\u{2502}");
+        assert_eq!(screen.cells[(1, 1)].symbol(), " ", "no box above");
+        assert_eq!(screen.cells[(4, 2)].symbol(), " ", "nothing on the right");
     }
 
     #[test]
@@ -571,21 +623,29 @@ mod tests {
         registry.insert(floating(1, 0, 0, 3, 1));
         fill(&mut registry, 1, 'f');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 4));
+        let mut screen = Layer::new(6, 4);
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "f", "content still drawn");
-        assert_eq!(screen[(3, 0)].symbol(), "\u{2502}", "right edge lands");
-        assert_eq!(screen[(0, 1)].symbol(), "\u{2500}", "bottom edge lands");
-        assert_eq!(screen[(5, 3)].symbol(), " ", "nothing wrapped");
+        assert_eq!(screen.cells[(0, 0)].symbol(), "f", "content still drawn");
+        assert_eq!(
+            screen.cells[(3, 0)].symbol(),
+            "\u{2502}",
+            "right edge lands"
+        );
+        assert_eq!(
+            screen.cells[(0, 1)].symbol(),
+            "\u{2500}",
+            "bottom edge lands"
+        );
+        assert_eq!(screen.cells[(5, 3)].symbol(), " ", "nothing wrapped");
     }
 
     #[test]
     fn a_view_without_a_border_gets_none() {
         let mut registry = Registry::default();
         registry.insert(view(1, 2, 2, 2, 1, ViewKind::Floating));
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
+        let mut screen = Layer::new(8, 6);
         registry.composite(&mut screen);
-        assert_eq!(screen[(1, 1)].symbol(), " ");
+        assert_eq!(screen.cells[(1, 1)].symbol(), " ");
     }
 
     #[test]
@@ -594,9 +654,9 @@ mod tests {
         registry.insert(view(1, 4, 0, 8, 2, ViewKind::Tile));
         fill(&mut registry, 1, 't');
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let mut screen = Layer::new(6, 2);
         registry.composite(&mut screen);
-        assert_eq!(screen[(5, 0)].symbol(), "t");
+        assert_eq!(screen.cells[(5, 0)].symbol(), "t");
     }
 
     #[test]
@@ -605,8 +665,8 @@ mod tests {
         registry.insert(view(1, 0, 0, 10, 4, ViewKind::Tile));
         registry.resize(1, 20, 8);
         let vb = registry.get_mut(1).unwrap();
-        assert_eq!(vb.buffer.area.width, 20);
-        assert_eq!(vb.buffer.area.height, 8);
+        assert_eq!(vb.body.area().width, 20);
+        assert_eq!(vb.body.area().height, 8);
         assert_eq!(vb.view.width, 20);
         assert_eq!(vb.view.height, 8);
     }
@@ -618,10 +678,10 @@ mod tests {
         fill(&mut registry, 1, 't');
         registry.move_to(1, 2, 3);
 
-        let mut screen = Buffer::empty(Rect::new(0, 0, 8, 5));
+        let mut screen = Layer::new(8, 5);
         registry.composite(&mut screen);
-        assert_eq!(screen[(2, 3)].symbol(), "t", "moved, contents intact");
-        assert_eq!(screen[(0, 0)].symbol(), " ", "vacated");
+        assert_eq!(screen.cells[(2, 3)].symbol(), "t", "moved, contents intact");
+        assert_eq!(screen.cells[(0, 0)].symbol(), " ", "vacated");
     }
 
     #[test]

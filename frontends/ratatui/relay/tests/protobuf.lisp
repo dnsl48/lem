@@ -126,6 +126,19 @@
     (ok (pb:style.strikethrough style))
     (ok (pb:style.dim style))))
 
+(deftest an-underline-style-is-encoded
+  (let* ((state (codec:make-codec-state))
+         (session (make-session))
+         (style (first (pb:frame.styles
+                        (pb:to-display.frame
+                         (to-display (codec:encode
+                                      (sample-frame session
+                                                    :style (make-style :underline #xFF0000
+                                                                       :underline-style :curly))
+                                      state 1)))))))
+    (ok (eq :underline-style-curly (pb:style.underline-style style)))
+    (ok (= #xFF0000 (pb:style.underline-color style)))))
+
 (deftest styles-differing-only-in-font-style-get-different-ids
   (let* ((state (codec:make-codec-state))
          (session (make-session)))

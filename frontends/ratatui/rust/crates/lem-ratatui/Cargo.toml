@@ -15,7 +15,9 @@ arboard = { version = "3.6.1", default-features = false }
 crossterm = "0.29.0"
 lem-protocol = { path = "../lem-protocol" }
 prost = "0.14"
-ratatui-core = "0.1.2"
-ratatui-crossterm = "0.1.2"
+# The buffer, with its grapheme and width handling, and its diff. Not
+# ratatui-crossterm: src/present.rs writes to the terminal (ADR 0016).
+ratatui-core = { version = "0.1.2", features = ["underline-color"] }
 terminal-colorsaurus = "1"
+unicode-width = "0.2"
 uuid = { version = "1", features = ["v7"] }

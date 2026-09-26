@@ -81,7 +81,9 @@ last one, in order, then state.
   are stable for the session; 0 is no style. Colours are packed
   `0xRRGGBB`, and an absent colour means the default, not black. Italic,
   strikethrough and dim come from the attribute's property list
-  (ADR 0015).
+  (ADR 0015), and so does the underline style (ADR 0016). That style
+  states what Lem wants: a display draws a style its terminal cannot as a
+  straight underline.
 - **`Defaults`** come in the first frame and whenever a theme changes
   them. The display fills every unset colour with them when compositing,
   so a theme change reaches cells painted before it.
