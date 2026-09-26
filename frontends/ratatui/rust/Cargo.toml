@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/lem-protocol", "crates/lem-ratatui", "crates/lem-ratatui-launcher"]
+exclude = ["vendor/crossterm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,3 +19,7 @@ inherits = "release"
 lto = true
 codegen-units = 1
 strip = true
+
+# Local, documented terminal-query and control-byte fixes against upstream 0.29.0.
+[patch.crates-io]
+crossterm = { path = "vendor/crossterm" }
