@@ -3,13 +3,51 @@
 //! The browser display half gets this for free: each view is its own
 //! canvas and the browser composites them by z-index. A terminal has one
 //! grid and composites nothing, so views are painted into separate
-//! buffers and blitted here in layer order. See
-//! `../../../docs/protocol-notes.md` section 7.
+//! buffers and blitted here, in the order the relay states
+//! (`ViewsStacked`, ADR 0012). See `../../../docs/protocol-notes.md`
+//! section 7.
 
-use lem_protocol::{BorderShape, View, ViewKind, ViewType};
+use lem_protocol::v1::{self, BorderShape, ViewKind};
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::Rect;
-use ratatui_core::widgets::Widget;
+
+/// A view: where one Lem window's buffer goes on the screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct View {
+    pub id: u32,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub kind: ViewKind,
+    /// A modeline row below the view's height.
+    pub modeline: bool,
+    /// A floating window's border, in cells outside the view; 0 for none.
+    pub border: u16,
+    pub border_shape: BorderShape,
+}
+
+/// Screen coordinates are `u16` here and in ratatui; anything larger is
+/// off any real screen, so it saturates rather than wraps.
+pub fn cells(value: u32) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
+}
+
+impl From<&v1::ViewCreated> for View {
+    fn from(created: &v1::ViewCreated) -> Self {
+        Self {
+            id: created.view,
+            x: cells(created.x),
+            y: cells(created.y),
+            width: cells(created.width),
+            height: cells(created.height),
+            kind: created.kind(),
+            modeline: created.modeline,
+            border: cells(created.border),
+            border_shape: created.border_shape(),
+        }
+    }
+}
 
 /// A view and the cells painted into it.
 ///
@@ -24,10 +62,14 @@ pub struct ViewBuffer {
     pub modeline: Buffer,
 }
 
-/// Every live view, in insertion order.
+/// Every live view, in creation order, and the order to composite them in.
 #[derive(Default)]
 pub struct Registry {
     views: Vec<ViewBuffer>,
+    /// The relay's stacking order, bottom first, once it has sent one.
+    /// Views it does not list are not shown: a virtual frame the frame
+    /// multiplexer switched away from keeps its views alive.
+    stacking: Option<Vec<u32>>,
 }
 
 /// Copy `source` onto `screen` at (`x`, `y`), clipped to `area`.
@@ -53,7 +95,7 @@ const SEPARATOR: &str = "\u{2502}";
 /// Copy one view and its modeline onto the screen.
 fn blit_view(screen: &mut Buffer, vb: &ViewBuffer, area: Rect) {
     blit(screen, &vb.buffer, vb.view.x, vb.view.y, area);
-    if vb.view.has_modeline() {
+    if vb.view.modeline {
         // One row immediately below the view, not its last row.
         let y = vb.view.y.saturating_add(vb.view.height);
         blit(screen, &vb.modeline, vb.view.x, y, area);
@@ -74,7 +116,7 @@ fn draw_separator(screen: &mut Buffer, view: &View, area: Rect) {
     if x >= area.width {
         return;
     }
-    let rows = view.height + u16::from(view.has_modeline());
+    let rows = view.height + u16::from(view.modeline);
     for row in 0..rows {
         let Some(y) = view.y.checked_add(row) else {
             return;
@@ -117,13 +159,13 @@ fn put_cell(screen: &mut Buffer, x: i32, y: i32, symbol: &str, area: Rect) {
 /// (w + 2*border) by (h + 2*border). `left-border` is the exception — a
 /// single rule down the left edge, spanning only the view's own height.
 fn draw_border(screen: &mut Buffer, view: &View, area: Rect) {
-    let Some(size) = view.border.filter(|size| *size > 0) else {
+    if view.border == 0 {
         return;
-    };
-    let (size, x, y) = (i32::from(size), i32::from(view.x), i32::from(view.y));
+    }
+    let (size, x, y) = (i32::from(view.border), i32::from(view.x), i32::from(view.y));
     let (w, h) = (i32::from(view.width), i32::from(view.height));
 
-    if view.border_shape == Some(BorderShape::LeftBorder) {
+    if view.border_shape == BorderShape::LeftBorder {
         for row in 0..h {
             put_cell(screen, x - size, y + row, glyph::VERTICAL, area);
         }
@@ -135,7 +177,7 @@ fn draw_border(screen: &mut Buffer, view: &View, area: Rect) {
 
     // A drop curtain hangs from whatever is above it, so its top corners
     // join that line rather than turning away from it.
-    let (tl, tr) = if view.border_shape == Some(BorderShape::DropCurtain) {
+    let (tl, tr) = if view.border_shape == BorderShape::DropCurtain {
         (glyph::TEE_RIGHT, glyph::TEE_LEFT)
     } else {
         (glyph::TOP_LEFT, glyph::TOP_RIGHT)
@@ -155,10 +197,11 @@ fn draw_border(screen: &mut Buffer, view: &View, area: Rect) {
     }
 }
 
-/// Painting order. Tiles are the background, floating windows the top.
+/// Painting order before the relay has stated one: tiles are the
+/// background, floating windows the top.
 fn layer(kind: ViewKind) -> u8 {
     match kind {
-        ViewKind::Tile => 0,
+        ViewKind::Tile | ViewKind::Unspecified => 0,
         ViewKind::Header => 1,
         ViewKind::Floating => 2,
     }
@@ -177,11 +220,21 @@ impl Registry {
         });
     }
 
-    pub fn remove(&mut self, id: u64) {
+    pub fn remove(&mut self, id: u32) {
         self.views.retain(|vb| vb.view.id != id);
     }
 
-    /// How many views are tracked, html ones included.
+    /// Set the compositing order, bottom first.
+    pub fn stack(&mut self, order: Vec<u32>) {
+        self.stacking = Some(order);
+    }
+
+    /// Look a view up.
+    pub fn get(&self, id: u32) -> Option<&ViewBuffer> {
+        self.views.iter().find(|vb| vb.view.id == id)
+    }
+
+    /// How many views are tracked, shown or not.
     pub fn len(&self) -> usize {
         self.views.len()
     }
@@ -190,7 +243,7 @@ impl Registry {
         self.views.is_empty()
     }
 
-    pub fn get_mut(&mut self, id: u64) -> Option<&mut ViewBuffer> {
+    pub fn get_mut(&mut self, id: u32) -> Option<&mut ViewBuffer> {
         self.views.iter_mut().find(|vb| vb.view.id == id)
     }
 
@@ -199,7 +252,7 @@ impl Registry {
     /// Lem repaints a resized view in the same frame, so there is nothing
     /// worth preserving and a stale-size buffer would mis-clip the writes
     /// that follow.
-    pub fn resize(&mut self, id: u64, width: u16, height: u16) {
+    pub fn resize(&mut self, id: u32, width: u16, height: u16) {
         if let Some(vb) = self.get_mut(id) {
             vb.view.width = width;
             vb.view.height = height;
@@ -209,26 +262,25 @@ impl Registry {
     }
 
     /// Reposition a view, keeping its contents.
-    pub fn move_to(&mut self, id: u64, x: u16, y: u16) {
+    pub fn move_to(&mut self, id: u32, x: u16, y: u16) {
         if let Some(vb) = self.get_mut(id) {
             vb.view.x = x;
             vb.view.y = y;
         }
     }
 
-    /// Blit every paintable view into `screen`: tiles, then headers, then
+    /// Blit every shown view into `screen`, in the relay's stacking
+    /// order, or before it has sent one, tiles, then headers, then
     /// floating windows on top.
-    ///
-    /// Html views are skipped. A terminal cannot render them, and blitting
-    /// their empty buffer would blank whatever lies beneath — Lem's tabbar
-    /// is one, and it covers the top rows of the screen.
     pub fn composite(&self, screen: &mut Buffer) {
-        let mut ordered: Vec<&ViewBuffer> = self
-            .views
-            .iter()
-            .filter(|vb| vb.view.content_type == ViewType::Editor)
-            .collect();
-        ordered.sort_by_key(|vb| layer(vb.view.kind));
+        let ordered: Vec<&ViewBuffer> = match &self.stacking {
+            Some(order) => order.iter().filter_map(|id| self.get(*id)).collect(),
+            None => {
+                let mut all: Vec<&ViewBuffer> = self.views.iter().collect();
+                all.sort_by_key(|vb| layer(vb.view.kind));
+                all
+            }
+        };
 
         let area = screen.area;
 
@@ -254,38 +306,25 @@ impl Registry {
     }
 }
 
-/// Renders the composited screen.
-///
-/// `Frame`'s buffer is `pub(crate)`, so the only way into it is the
-/// `Widget` trait — which lives in `ratatui-core` alongside the buffer.
-/// This is the one piece of Ratatui's widget system the frontend uses,
-/// and it is the trait, not the widget library (ADR 0002).
-impl Widget for &Registry {
-    fn render(self, _area: Rect, buf: &mut Buffer) {
-        self.composite(buf);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn view(id: u64, x: u16, y: u16, w: u16, h: u16, kind: ViewKind) -> View {
+    fn view(id: u32, x: u16, y: u16, w: u16, h: u16, kind: ViewKind) -> View {
         View {
             id,
             x,
             y,
             width: w,
             height: h,
-            use_modeline: None,
             kind,
-            content_type: ViewType::Editor,
-            border: None,
-            border_shape: None,
+            modeline: false,
+            border: 0,
+            border_shape: BorderShape::None,
         }
     }
 
-    fn fill(registry: &mut Registry, id: u64, ch: char) {
+    fn fill(registry: &mut Registry, id: u32, ch: char) {
         let vb = registry.get_mut(id).expect("view should exist");
         let area = vb.buffer.area;
         for y in 0..area.height {
@@ -339,21 +378,34 @@ mod tests {
     }
 
     #[test]
-    fn html_views_are_tracked_but_never_painted() {
-        // Lem's tabbar is an html header occupying the top rows. A
-        // terminal cannot render it, and painting its blank buffer would
-        // wipe whatever is beneath.
+    fn the_stated_order_wins_over_kinds() {
+        // Two floating windows: the relay says which is on top.
         let mut registry = Registry::default();
-        registry.insert(view(1, 0, 0, 6, 2, ViewKind::Tile));
-        let mut tabbar = view(2, 0, 0, 6, 1, ViewKind::Header);
-        tabbar.content_type = ViewType::Html;
-        registry.insert(tabbar);
-        fill(&mut registry, 1, 't');
+        registry.insert(view(1, 0, 0, 4, 1, ViewKind::Floating));
+        registry.insert(view(2, 0, 0, 4, 1, ViewKind::Floating));
+        fill(&mut registry, 1, 'a');
+        fill(&mut registry, 2, 'b');
+        registry.stack(vec![2, 1]);
 
-        assert!(registry.get_mut(2).is_some(), "still tracked");
-        let mut screen = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 1));
         registry.composite(&mut screen);
-        assert_eq!(screen[(0, 0)].symbol(), "t", "tile shows through");
+        assert_eq!(screen[(0, 0)].symbol(), "a", "listed last, drawn last");
+    }
+
+    #[test]
+    fn views_not_stacked_are_not_shown() {
+        // A virtual frame switched away from keeps its views alive.
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 4, 1, ViewKind::Tile));
+        registry.insert(view(2, 0, 0, 4, 1, ViewKind::Tile));
+        fill(&mut registry, 1, 'a');
+        fill(&mut registry, 2, 'b');
+        registry.stack(vec![1]);
+
+        let mut screen = Buffer::empty(Rect::new(0, 0, 4, 1));
+        registry.composite(&mut screen);
+        assert_eq!(screen[(0, 0)].symbol(), "a");
+        assert_eq!(registry.len(), 2, "still tracked");
     }
 
     #[test]
@@ -363,7 +415,7 @@ mod tests {
         // it into the view would overwrite the buffer's first line.
         let mut registry = Registry::default();
         let mut v = view(1, 0, 1, 4, 2, ViewKind::Tile);
-        v.use_modeline = Some(true);
+        v.modeline = true;
         registry.insert(v);
         fill(&mut registry, 1, 'b');
         {
@@ -401,7 +453,7 @@ mod tests {
         let mut registry = Registry::default();
         registry.insert(view(1, 0, 0, 4, 2, ViewKind::Tile));
         let mut right = view(2, 6, 0, 4, 2, ViewKind::Tile);
-        right.use_modeline = Some(true);
+        right.modeline = true;
         registry.insert(right);
         fill(&mut registry, 1, 'l');
         fill(&mut registry, 2, 'r');
@@ -452,9 +504,9 @@ mod tests {
         assert_eq!(screen[(2, 1)].symbol(), "\u{2502}", "still drawn below it");
     }
 
-    fn floating(id: u64, x: u16, y: u16, w: u16, h: u16) -> View {
+    fn floating(id: u32, x: u16, y: u16, w: u16, h: u16) -> View {
         let mut v = view(id, x, y, w, h, ViewKind::Floating);
-        v.border = Some(1);
+        v.border = 1;
         v
     }
 
@@ -482,7 +534,7 @@ mod tests {
     fn a_drop_curtain_joins_what_is_above_it() {
         let mut registry = Registry::default();
         let mut v = floating(1, 2, 2, 2, 1);
-        v.border_shape = Some(BorderShape::DropCurtain);
+        v.border_shape = BorderShape::DropCurtain;
         registry.insert(v);
 
         let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
@@ -500,7 +552,7 @@ mod tests {
     fn a_left_border_is_a_rule_not_a_box() {
         let mut registry = Registry::default();
         let mut v = floating(1, 2, 2, 2, 2);
-        v.border_shape = Some(BorderShape::LeftBorder);
+        v.border_shape = BorderShape::LeftBorder;
         registry.insert(v);
 
         let mut screen = Buffer::empty(Rect::new(0, 0, 8, 6));
@@ -582,39 +634,23 @@ mod tests {
     }
 
     #[test]
-    fn decodes_the_real_views_from_the_capture() {
-        // Proves the mixed snake_case/camelCase handling and the null
-        // use_modeline against actual wire data, not a hand-written sample.
-        // Decoded straight from the argument rather than through
-        // Instruction, which does not learn make-view until Task 6.
-        let capture = include_str!("../../lem-protocol/tests/fixtures/frame.jsonl");
-        let mut views: Vec<View> = Vec::new();
-        for line in capture.lines().filter(|l| !l.trim().is_empty()) {
-            let msg: serde_json::Value = serde_json::from_str(line).unwrap();
-            if msg["method"] != "bulk" {
-                continue;
-            }
-            for instruction in msg["params"].as_array().unwrap() {
-                if instruction["method"] == "make-view" {
-                    views.push(serde_json::from_value(instruction["argument"].clone()).unwrap());
-                }
-            }
-        }
-
-        assert_eq!(views.len(), 2);
-
-        let editor = &views[0];
-        assert_eq!(editor.id, 1);
-        assert_eq!((editor.x, editor.y), (0, 2));
-        assert_eq!((editor.width, editor.height), (80, 21));
-        assert_eq!(editor.kind, ViewKind::Tile);
-        assert_eq!(editor.content_type, ViewType::Editor);
-        assert!(editor.has_modeline());
-
-        let tabbar = &views[1];
-        assert_eq!(tabbar.id, 2);
-        assert_eq!(tabbar.kind, ViewKind::Header);
-        assert_eq!(tabbar.content_type, ViewType::Html);
-        assert!(!tabbar.has_modeline(), "null use_modeline reads as false");
+    fn a_view_is_made_from_what_the_relay_sends() {
+        let view = View::from(&v1::ViewCreated {
+            view: 4,
+            x: 1,
+            y: 2,
+            width: 30,
+            height: 8,
+            kind: ViewKind::Floating as i32,
+            modeline: false,
+            border: 1,
+            border_shape: BorderShape::DropCurtain as i32,
+        });
+        assert_eq!(
+            (view.id, view.x, view.y, view.width, view.height),
+            (4, 1, 2, 30, 8)
+        );
+        assert_eq!(view.kind, ViewKind::Floating);
+        assert_eq!(view.border_shape, BorderShape::DropCurtain);
     }
 }

@@ -201,7 +201,21 @@ gone.
    Framing uses `decode_length_delimited`. Remove `serde` and `serde_json`.
    Then move `lem-ratatui` (`views.rs`, `paint.rs`, `input.rs`,
    `transport.rs`) onto the generated types. The interned style table
-   lives display-side. Implement [0012](adr/0012-the-relay-frame-model.md)'s
+   lives display-side.
+
+   *Done*, in two commits. `lem-protocol` gained `v1` alongside the JSON
+   types. Then the display moved onto it and `lem-ratatui` switched to
+   `lem-relay/protobuf` in one change, since the wire changes for both
+   halves at once. The display now puts the terminal's cursor where Lem's
+   is, shaped; fills unset colours from the theme's defaults when
+   compositing; fits each run to its `width`; composites in
+   `views-stacked` order, showing only listed views; captures the mouse
+   and turns on bracketed paste; and sends keys neutrally (ADR 0014). The
+   relay turns C-] into abort, as ncurses and the browser client do. The
+   frame multiplexer is back on: its tab bar shows on row 0, as in
+   ncurses. Acceptance 9/9. The workload, medians of five: 175 frames,
+   59,069 B, against 190 / 265,007 B on `lem-relay/json` (−78%) and the
+   original baseline's 186 / 315,475 B (−81%). Implement [0012](adr/0012-the-relay-frame-model.md)'s
    display half: the hardware cursor with its shape and visibility,
    default colours, fitting each run to its `width`, and compositing
    in `views-stacked` order. Then remove `keep-frame-multiplexer-off`

@@ -61,6 +61,28 @@ dequeues first, so ignoring the error still discards the event."
   (let ((event (next-event)))
     (ok (equal "q" (lem:key-sym event)))))
 
+;;; C-] interrupts
+
+(deftest c-right-bracket-interrupts-rather-than-queueing
+  (drain)
+  (let* ((relay (make-instance 'input-relay))
+         (ready (bt2:make-semaphore))
+         (thread (bt2:make-thread
+                  (lambda ()
+                    (handler-case (progn (bt2:signal-semaphore ready) (sleep 5) :finished)
+                      (lem:editor-interrupt () :interrupted))))))
+    (setf (relay-editor-thread relay) thread)
+    (bt2:wait-on-semaphore ready)
+    (deliver relay (make-key-input "]" :ctrl t :seq 6))
+    (ok (eq :interrupted (bt2:join-thread thread)))
+    (ok (zerop (lem:event-queue-length)) "no key queued")
+    (ok (= 6 (relay-input-seq relay)) "still counted as delivered")))
+
+(deftest c-g-stays-a-key
+  (ok (= 1 (queued-after (lambda ()
+                           (deliver (make-instance 'input-relay)
+                                    (make-key-input "g" :ctrl t)))))))
+
 ;;; Mouse
 
 (deftest a-click-is-a-mouse-button-down
