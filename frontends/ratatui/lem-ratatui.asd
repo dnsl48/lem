@@ -5,7 +5,7 @@
                ;; to bring these in; nothing else here does.
                (:feature (:not :lem-minimal-build) "lem/extensions")
                "lem-relay"
-               "lem-relay/json")
+               "lem-relay/protobuf")
   :serial t
   :pathname "lisp/"
   :components ((:file "implementation")

@@ -1,212 +1,252 @@
-//! crossterm key events to Lem key syms.
+//! crossterm events to `lem.relay.v1` input.
 //!
-//! The vocabulary is Lem's, not crossterm's. `frontends/ncurses/key.lisp`
-//! is the authoritative list of sym names, and `convert-keyevent` in
-//! `frontends/server/main.lisp` is the receiving end.
+//! The display describes what happened and the relay turns it into what
+//! Lem consumes (ADR 0013, 0014): which key, which modifiers, which mouse
+//! button at which cell. Lem's key names, its shift rules and click counts
+//! are all the relay's. What stays here is reading the terminal right.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde::Serialize;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use lem_protocol::v1::{self, NamedKey, key, mouse};
 
-/// The `value` of an `input` notification of kind `key`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KeyPayload {
-    pub key: String,
-    pub ctrl: bool,
-    pub meta: bool,
-    /// Serialised as `super`, which is a reserved word in Rust.
-    #[serde(rename = "super")]
-    pub super_: bool,
-    pub shift: bool,
-}
-
-/// Translate a key event, or `None` if Lem has no sym for it.
+/// Describe a key event, or `None` for a key the protocol has no word for.
 ///
-/// Returning `None` rather than guessing matters: an unrecognised key
-/// forwarded as a bogus sym would be interpreted by Lem as some other
-/// binding, which is worse than being ignored.
-pub fn convert(event: KeyEvent) -> Option<KeyPayload> {
-    let sym = match event.code {
-        // Space is a named sym, not the character; convert-keyevent
-        // special-cases it on the far side too.
-        KeyCode::Char(' ') => "Space".to_string(),
+/// Dropping an unknown key rather than guessing matters: forwarded as
+/// something else, it would run some other binding.
+pub fn key(event: KeyEvent) -> Option<v1::Key> {
+    let code = match event.code {
         // crossterm decodes the C0 controls 0x1C..0x1F as Ctrl+'4'..'7'
-        // — `(c - 0x1C + b'4')` in its unix parser — but ASCII names
-        // those bytes C-\ C-] C-^ C-_, and so does Lem
-        // (`frontends/ncurses/key.lisp`). C-_ is bound to redo, so
-        // passing the digit through breaks a documented binding.
-        //
-        // The two are indistinguishable on the wire: a terminal sends
-        // 0x1C for both Ctrl+4 and C-\. The ASCII reading is the one
-        // Lem binds, so it wins. Enabling the kitty keyboard protocol
-        // would disambiguate them and this would need revisiting.
+        // (`c - 0x1C + b'4'` in its unix parser), but the terminal sent
+        // C-\ C-] C-^ C-_, as ASCII and Lem name those bytes; C-_ is
+        // redo, and C-] is abort. Both readings arrive as the same byte,
+        // and the ASCII one is what Lem binds. The kitty keyboard
+        // protocol would tell them apart.
         KeyCode::Char(digit @ ('4'..='7')) if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            const NAMES: [&str; 4] = ["\\", "]", "^", "_"];
-            NAMES[digit as usize - '4' as usize].to_string()
+            const CONTROLS: [&str; 4] = ["\\", "]", "^", "_"];
+            key::Code::Text(CONTROLS[digit as usize - '4' as usize].into())
         }
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::Enter => "Return".to_string(),
-        KeyCode::Tab | KeyCode::BackTab => "Tab".to_string(),
-        KeyCode::Esc => "Escape".to_string(),
-        KeyCode::Backspace => "Backspace".to_string(),
-        KeyCode::Delete => "Delete".to_string(),
-        KeyCode::Up => "Up".to_string(),
-        KeyCode::Down => "Down".to_string(),
-        KeyCode::Left => "Left".to_string(),
-        KeyCode::Right => "Right".to_string(),
-        KeyCode::Home => "Home".to_string(),
-        KeyCode::End => "End".to_string(),
-        KeyCode::PageUp => "PageUp".to_string(),
-        KeyCode::PageDown => "PageDown".to_string(),
-        KeyCode::F(n) => format!("F{n}"),
+        KeyCode::Char(c) => key::Code::Text(c.to_string()),
+        KeyCode::Enter => key::Code::Named(NamedKey::Enter as i32),
+        KeyCode::Tab | KeyCode::BackTab => key::Code::Named(NamedKey::Tab as i32),
+        KeyCode::Backspace => key::Code::Named(NamedKey::Backspace as i32),
+        KeyCode::Esc => key::Code::Named(NamedKey::Escape as i32),
+        KeyCode::Insert => key::Code::Named(NamedKey::Insert as i32),
+        KeyCode::Delete => key::Code::Named(NamedKey::Delete as i32),
+        KeyCode::Up => key::Code::Named(NamedKey::Up as i32),
+        KeyCode::Down => key::Code::Named(NamedKey::Down as i32),
+        KeyCode::Left => key::Code::Named(NamedKey::Left as i32),
+        KeyCode::Right => key::Code::Named(NamedKey::Right as i32),
+        KeyCode::Home => key::Code::Named(NamedKey::Home as i32),
+        KeyCode::End => key::Code::Named(NamedKey::End as i32),
+        KeyCode::PageUp => key::Code::Named(NamedKey::PageUp as i32),
+        KeyCode::PageDown => key::Code::Named(NamedKey::PageDown as i32),
+        KeyCode::Menu => key::Code::Named(NamedKey::ContextMenu as i32),
+        KeyCode::F(n) => key::Code::Function(u32::from(n)),
         _ => return None,
     };
 
-    // Mirror lem:insertion-key-sym-p, which is simply (= 1 (length sym)).
-    // Lem drops shift for those, folding it into the character itself; a
-    // sym of "A" with shift set matches no binding.
-    let is_insertion = sym.chars().count() == 1;
-    let shift =
-        event.modifiers.contains(KeyModifiers::SHIFT) || matches!(event.code, KeyCode::BackTab);
+    let mut modifiers = Vec::new();
+    for (flag, modifier) in [
+        (KeyModifiers::CONTROL, v1::Modifier::Ctrl),
+        (KeyModifiers::ALT, v1::Modifier::Meta),
+        (KeyModifiers::SHIFT, v1::Modifier::Shift),
+        (KeyModifiers::SUPER, v1::Modifier::Super),
+    ] {
+        if event.modifiers.contains(flag) {
+            modifiers.push(modifier as i32);
+        }
+    }
+    // BackTab is shift-tab whether or not the terminal also sets SHIFT.
+    if event.code == KeyCode::BackTab && !event.modifiers.contains(KeyModifiers::SHIFT) {
+        modifiers.push(v1::Modifier::Shift as i32);
+    }
 
-    Some(KeyPayload {
-        ctrl: event.modifiers.contains(KeyModifiers::CONTROL),
-        meta: event.modifiers.contains(KeyModifiers::ALT),
-        super_: event.modifiers.contains(KeyModifiers::SUPER),
-        shift: !is_insertion && shift,
-        key: sym,
+    Some(v1::Key {
+        code: Some(code),
+        modifiers,
     })
+}
+
+fn button(button: MouseButton) -> v1::Button {
+    match button {
+        MouseButton::Left => v1::Button::Left,
+        MouseButton::Middle => v1::Button::Middle,
+        MouseButton::Right => v1::Button::Right,
+    }
+}
+
+/// Describe a mouse event, at the screen cell it happened on.
+pub fn mouse(event: MouseEvent) -> v1::Mouse {
+    let action = match event.kind {
+        MouseEventKind::Down(b) => mouse::Action::Press(v1::Press {
+            button: button(b) as i32,
+        }),
+        MouseEventKind::Up(b) => mouse::Action::Release(v1::Release {
+            button: button(b) as i32,
+        }),
+        MouseEventKind::Drag(b) => mouse::Action::Move(v1::Move {
+            button: Some(button(b) as i32),
+        }),
+        MouseEventKind::Moved => mouse::Action::Move(v1::Move { button: None }),
+        // Lines, positive up and left, as Lem reads them.
+        MouseEventKind::ScrollUp => mouse::Action::Wheel(v1::Wheel { dx: 0, dy: 1 }),
+        MouseEventKind::ScrollDown => mouse::Action::Wheel(v1::Wheel { dx: 0, dy: -1 }),
+        MouseEventKind::ScrollLeft => mouse::Action::Wheel(v1::Wheel { dx: 1, dy: 0 }),
+        MouseEventKind::ScrollRight => mouse::Action::Wheel(v1::Wheel { dx: -1, dy: 0 }),
+    };
+    v1::Mouse {
+        x: u32::from(event.column),
+        y: u32::from(event.row),
+        action: Some(action),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn key(code: KeyCode, modifiers: KeyModifiers) -> Option<KeyPayload> {
-        convert(KeyEvent::new(code, modifiers))
+    fn described(code: KeyCode, modifiers: KeyModifiers) -> v1::Key {
+        key(KeyEvent::new(code, modifiers)).expect("a key the protocol knows")
+    }
+
+    fn text(k: &v1::Key) -> Option<&str> {
+        match &k.code {
+            Some(key::Code::Text(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn has(k: &v1::Key, modifier: v1::Modifier) -> bool {
+        k.modifiers.contains(&(modifier as i32))
     }
 
     #[test]
-    fn plain_characters_become_single_character_syms() {
-        let payload = key(KeyCode::Char('a'), KeyModifiers::NONE).unwrap();
-        assert_eq!(payload.key, "a");
-        assert!(!payload.ctrl && !payload.meta && !payload.shift && !payload.super_);
+    fn a_character_is_its_text() {
+        let k = described(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert_eq!(text(&k), Some("a"));
+        assert!(k.modifiers.is_empty());
     }
 
     #[test]
-    fn control_and_alt_are_carried_as_flags() {
-        let payload = key(KeyCode::Char('x'), KeyModifiers::CONTROL).unwrap();
-        assert_eq!(payload.key, "x");
-        assert!(payload.ctrl);
-
-        let payload = key(KeyCode::Char('x'), KeyModifiers::ALT).unwrap();
-        assert!(payload.meta, "ALT is Lem's meta");
+    fn a_space_is_text_too() {
+        // Naming it "Space" is the relay's job (ADR 0014).
+        assert_eq!(
+            text(&described(KeyCode::Char(' '), KeyModifiers::NONE)),
+            Some(" ")
+        );
     }
 
     #[test]
-    fn shift_is_dropped_for_insertion_keys() {
-        // convert-keyevent discards shift when the sym is one character
-        // (lem:insertion-key-sym-p). Sending it produces a key Lem cannot
-        // match, so the capital arrives with shift already folded in.
-        let payload = key(KeyCode::Char('A'), KeyModifiers::SHIFT).unwrap();
-        assert_eq!(payload.key, "A");
-        assert!(!payload.shift, "shift must be dropped for a 1-char sym");
+    fn modifiers_are_reported_as_they_are() {
+        let k = described(
+            KeyCode::Char('A'),
+            KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL,
+        );
+        assert!(
+            has(&k, v1::Modifier::Shift),
+            "the relay decides what shift means"
+        );
+        assert!(has(&k, v1::Modifier::Meta), "ALT is Lem's meta");
+        assert!(has(&k, v1::Modifier::Ctrl));
     }
 
     #[test]
-    fn shift_survives_for_named_keys() {
-        let payload = key(KeyCode::F(3), KeyModifiers::SHIFT).unwrap();
-        assert_eq!(payload.key, "F3");
-        assert!(payload.shift);
-    }
-
-    #[test]
-    fn space_has_its_own_sym() {
-        let payload = key(KeyCode::Char(' '), KeyModifiers::NONE).unwrap();
-        assert_eq!(payload.key, "Space");
-        assert!(!payload.shift);
-    }
-
-    #[test]
-    fn named_keys_use_lems_vocabulary() {
-        for (code, expected) in [
-            (KeyCode::Enter, "Return"),
-            (KeyCode::Tab, "Tab"),
-            (KeyCode::BackTab, "Tab"),
-            (KeyCode::Esc, "Escape"),
-            (KeyCode::Backspace, "Backspace"),
-            (KeyCode::Delete, "Delete"),
-            (KeyCode::Up, "Up"),
-            (KeyCode::Down, "Down"),
-            (KeyCode::Left, "Left"),
-            (KeyCode::Right, "Right"),
-            (KeyCode::Home, "Home"),
-            (KeyCode::End, "End"),
-            (KeyCode::PageUp, "PageUp"),
-            (KeyCode::PageDown, "PageDown"),
-            (KeyCode::F(1), "F1"),
-            (KeyCode::F(12), "F12"),
+    fn named_keys_are_named() {
+        for (code, named) in [
+            (KeyCode::Enter, NamedKey::Enter),
+            (KeyCode::Tab, NamedKey::Tab),
+            (KeyCode::Esc, NamedKey::Escape),
+            (KeyCode::Backspace, NamedKey::Backspace),
+            (KeyCode::Insert, NamedKey::Insert),
+            (KeyCode::Delete, NamedKey::Delete),
+            (KeyCode::Up, NamedKey::Up),
+            (KeyCode::Home, NamedKey::Home),
+            (KeyCode::PageDown, NamedKey::PageDown),
+            (KeyCode::Menu, NamedKey::ContextMenu),
         ] {
             assert_eq!(
-                key(code, KeyModifiers::NONE).unwrap().key,
-                expected,
+                described(code, KeyModifiers::NONE).code,
+                Some(key::Code::Named(named as i32)),
                 "{code:?}"
             );
         }
     }
 
     #[test]
-    fn back_tab_carries_shift() {
-        // BackTab *is* shift-tab; the modifier may or may not be set
-        // depending on the terminal, so it is asserted explicitly.
-        let payload = key(KeyCode::BackTab, KeyModifiers::NONE).unwrap();
-        assert_eq!(payload.key, "Tab");
-        assert!(payload.shift);
-    }
-
-    #[test]
-    fn the_c0_controls_keep_their_ascii_names() {
-        // crossterm reports bytes 0x1C..0x1F as Ctrl+'4'..'7' — see
-        // parse_event in its unix parser — but ASCII and Lem both call
-        // them C-\ C-] C-^ C-_. C-_ is bound to redo, so getting this
-        // wrong breaks a documented binding.
-        for (reported, expected) in [('4', "\\"), ('5', "]"), ('6', "^"), ('7', "_")] {
-            let payload = key(KeyCode::Char(reported), KeyModifiers::CONTROL).unwrap();
-            assert_eq!(payload.key, expected, "Ctrl+{reported}");
-            assert!(payload.ctrl);
-        }
-    }
-
-    #[test]
-    fn digits_without_control_are_left_alone() {
+    fn function_keys_are_numbered() {
         assert_eq!(
-            key(KeyCode::Char('4'), KeyModifiers::NONE).unwrap().key,
-            "4"
+            described(KeyCode::F(12), KeyModifiers::NONE).code,
+            Some(key::Code::Function(12))
         );
     }
 
     #[test]
-    fn unmapped_keys_are_dropped() {
-        assert!(key(KeyCode::Null, KeyModifiers::NONE).is_none());
+    fn back_tab_is_shift_tab() {
+        let k = described(KeyCode::BackTab, KeyModifiers::NONE);
+        assert_eq!(k.code, Some(key::Code::Named(NamedKey::Tab as i32)));
+        assert!(has(&k, v1::Modifier::Shift));
+        let k = described(KeyCode::BackTab, KeyModifiers::SHIFT);
+        assert_eq!(k.modifiers.len(), 1, "shift once, not twice");
     }
 
     #[test]
-    fn a_multibyte_character_is_one_sym() {
-        let payload = key(KeyCode::Char('é'), KeyModifiers::NONE).unwrap();
-        assert_eq!(payload.key, "é");
-        assert!(!payload.shift, "one char, so shift is dropped");
-    }
-
-    #[test]
-    fn serialises_under_the_wire_names() {
-        let payload = key(KeyCode::Char('a'), KeyModifiers::SUPER).unwrap();
-        let json = serde_json::to_value(&payload).unwrap();
-        assert_eq!(json["super"], true);
-        assert!(
-            json.get("super_").is_none(),
-            "no Rust-side name on the wire"
-        );
-        for field in ["key", "ctrl", "meta", "shift"] {
-            assert!(json.get(field).is_some(), "missing {field}");
+    fn the_c0_controls_keep_their_ascii_meaning() {
+        for (reported, meant) in [('4', "\\"), ('5', "]"), ('6', "^"), ('7', "_")] {
+            let k = described(KeyCode::Char(reported), KeyModifiers::CONTROL);
+            assert_eq!(text(&k), Some(meant), "Ctrl+{reported}");
+            assert!(has(&k, v1::Modifier::Ctrl));
         }
+        assert_eq!(
+            text(&described(KeyCode::Char('4'), KeyModifiers::NONE)),
+            Some("4")
+        );
+    }
+
+    #[test]
+    fn unknown_keys_are_dropped() {
+        assert!(key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE)).is_none());
+    }
+
+    fn mouse_at(kind: MouseEventKind) -> v1::Mouse {
+        mouse(MouseEvent {
+            kind,
+            column: 7,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn mouse_events_carry_their_cell_and_action() {
+        let press = mouse_at(MouseEventKind::Down(MouseButton::Left));
+        assert_eq!((press.x, press.y), (7, 3));
+        assert_eq!(
+            press.action,
+            Some(mouse::Action::Press(v1::Press {
+                button: v1::Button::Left as i32
+            }))
+        );
+        assert_eq!(
+            mouse_at(MouseEventKind::Drag(MouseButton::Right)).action,
+            Some(mouse::Action::Move(v1::Move {
+                button: Some(v1::Button::Right as i32)
+            })),
+            "a drag is a move with a button"
+        );
+        assert_eq!(
+            mouse_at(MouseEventKind::Moved).action,
+            Some(mouse::Action::Move(v1::Move { button: None }))
+        );
+    }
+
+    #[test]
+    fn the_wheel_is_in_lines_positive_up() {
+        assert_eq!(
+            mouse_at(MouseEventKind::ScrollUp).action,
+            Some(mouse::Action::Wheel(v1::Wheel { dx: 0, dy: 1 }))
+        );
+        assert_eq!(
+            mouse_at(MouseEventKind::ScrollDown).action,
+            Some(mouse::Action::Wheel(v1::Wheel { dx: 0, dy: -1 }))
+        );
     }
 }

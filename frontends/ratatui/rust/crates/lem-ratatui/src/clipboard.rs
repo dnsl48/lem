@@ -1,10 +1,10 @@
 //! System clipboard access.
 //!
-//! Lem asks for the clipboard by notification and waits on a queue with a
-//! **0.1 second timeout** (`lem-if:clipboard-paste` in
-//! `frontends/server/main.lisp`). Missing that deadline is not fatal —
-//! the paste simply yields nothing — but it does mean the read has to be
-//! synchronous and quick rather than handed to a thread.
+//! The relay asks with `ClipboardRequest` and waits **0.1 seconds** for the
+//! reply (`*clipboard-timeout*` in `relay/relay.lisp`, as lem-server did).
+//! Missing that deadline is not fatal — the paste simply yields nothing —
+//! but it does mean the read has to be synchronous and quick rather than
+//! handed to a thread.
 
 use arboard::Clipboard as SystemClipboard;
 
@@ -30,16 +30,14 @@ impl Clipboard {
         Self { inner }
     }
 
-    /// Current clipboard text, or an empty string.
-    ///
-    /// An empty string is returned rather than nothing on failure because
-    /// Lem is waiting: replying promptly with nothing beats letting it
-    /// time out, and the visible result is the same.
-    pub fn get(&mut self) -> String {
+    /// Current clipboard text, or `None` when there is no clipboard or
+    /// nothing readable on it. The relay is waiting either way, so the
+    /// answer goes back promptly, saying so, rather than letting it time
+    /// out.
+    pub fn get(&mut self) -> Option<String> {
         self.inner
             .as_mut()
             .and_then(|clipboard| clipboard.get_text().ok())
-            .unwrap_or_default()
     }
 
     pub fn set(&mut self, text: &str) {

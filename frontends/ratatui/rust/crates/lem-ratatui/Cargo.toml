@@ -1,6 +1,6 @@
 [package]
 name = "lem-ratatui"
-description = "Terminal display half for Lem: paints lem-server protocol frames with crossterm."
+description = "Terminal display half for Lem: paints lem.relay.v1 frames with crossterm."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,7 +14,7 @@ anyhow = "1.0.104"
 arboard = { version = "3.6.1", default-features = false }
 crossterm = "0.29.0"
 lem-protocol = { path = "../lem-protocol" }
+prost = "0.14"
 ratatui-core = "0.1.2"
 ratatui-crossterm = "0.1.2"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+uuid = { version = "1", features = ["v7"] }

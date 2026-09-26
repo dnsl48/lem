@@ -1,15 +1,16 @@
 # lem-ratatui
 
 A terminal frontend for Lem built on `crossterm`. Lem's side is
-`lem-relay`, our own implementation of the `lem-if` protocol, which today
-speaks the JSON display protocol the browser frontend uses and is moving
-to a protobuf protocol of its own (see [`docs/relay-plan.md`](docs/relay-plan.md)).
+`lem-relay`, our own implementation of the `lem-if` protocol, and the two
+halves speak `lem.relay.v1`, a protobuf protocol defined in
+[`proto/`](proto/lem/relay/v1/relay.proto) (see
+[`docs/relay-plan.md`](docs/relay-plan.md)).
 
 > **Status: working PoC.** Opens files, edits them, renders syntax
 > colours, reflows on resize and leaves the terminal clean on exit — all
 > the acceptance checks from [`docs/poc-plan.md`](docs/poc-plan.md) pass.
-> Splits, popups and the clipboard work; the mouse and images do not.
-> See **Next steps** and **Known gaps** below.
+> Splits, popups, tabs (the frame multiplexer), the clipboard and the
+> mouse work; images do not. See **Next steps** and **Known gaps** below.
 
 ## Shape
 
@@ -283,25 +284,30 @@ Nothing here is required for the PoC; each is its own piece of work.
   cursor with its shape, theme colours, stacking order).
 - **Report the jsonrpc stdio defects upstream** (protocol-notes section
   13). We no longer depend on them, but `lem-server --mode stdio` does.
-- **Mouse and images.** The relay delivers mouse input and counts
-  double and triple clicks (`lem-relay/input:*click-interval*`, 0.5 s),
-  but the display does not capture the mouse yet. When it does, in phase
-  2, terminal-native selection moves to Shift+drag, which most terminals
-  keep while an application has the mouse. A terminal draws no images.
+- **Images.** A terminal draws none.
 - **No tabbar.** Lem's lives in `lem-server` and is html-only, so it is
   not loaded here; a terminal-native one would be a feature, not a port.
-- **The frame multiplexer is off** until the display composites by
-  `views-stacked`: switching back to an earlier virtual frame would show
-  the wrong one (`lisp/main.lisp`).
 - **Find more geometry bugs by reconstructing the screen.** The modeline
   rendered in the wrong row for six tasks because acceptance only checked
   that its text was present. Replaying the escape stream into a virtual
   screen and reading it row by row catches what substring checks cannot.
-- **Cursor shape and position**: the relay sends both, but the display
-  ignores them until phase 2; the cursor renders as Lem's own painted
-  cell.
+- **Terminal colour detection.** `Hello` can carry the terminal's own
+  default colours, for Lem's light/dark choice before a theme sets its
+  own; the display does not query them yet (OSC 10/11).
 
-## Keys
+## Keys and mouse
+
+**C-]** interrupts the editor when it is busy (`abort`), as in the ncurses
+and browser frontends. C-g is an ordinary key, so `keyboard-quit` works as
+always. The display describes keys neutrally and the relay gives them
+Lem's names ([ADR 0014](docs/adr/0014-the-display-describes-keys.md)).
+
+The **mouse** is captured: click, drag, and the wheel reach Lem, and
+double and triple clicks select an expression and a form. The relay counts
+them, within `lem-relay/input:*click-interval*` (0.5 s, settable from
+`init.lisp`). Capturing takes the terminal's own text selection away;
+most terminals keep it on **Shift+drag**. Pasting from the terminal
+(bracketed paste) inserts the text as the major mode pastes.
 
 crossterm decodes the C0 controls 0x1C–0x1F as `Ctrl+'4'` through
 `Ctrl+'7'`, but ASCII and Lem both name those bytes `C-\`, `C-]`, `C-^`
