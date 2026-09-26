@@ -60,7 +60,9 @@ display                                    relay
 ```
 
 The editor waits for `Hello` before it starts, because until then it does
-not know the screen's size. There is no "redraw" step: the first frame
+not know the screen's size. `Hello` also carries the terminal's own
+default colours when the display could find them out (OSC 10/11): Lem
+judges light or dark mode by them unless a theme decides. There is no "redraw" step: the first frame
 follows on its own. A `Hello` the relay cannot serve (no
 `protocol_version`) gets `Exit` with the reason, not silence.
 
