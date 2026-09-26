@@ -9,6 +9,13 @@
            :relay-display-height
            :relay-foreground
            :relay-background
+           :relay-terminal-capabilities
+           :terminal-capabilities
+           :make-terminal-capabilities
+           :terminal-capabilities-keyboard-disambiguation
+           :terminal-capabilities-alternate-key-reporting
+           :terminal-capabilities-keypad-identity
+           :describe-terminal-capabilities
            :relay-editor-thread
            :relay-last-press
            :relay-mouse-x
@@ -37,6 +44,16 @@ clipboard must not stall the editor.")
 its `seq', as `reply_to' (ADR 0013), and arrives as a
 `clipboard-replied' call.")
 
+(defstruct (terminal-capabilities (:copier nil))
+  "The display's confirmed keyboard features, immutable for this Hello.
+An instance with all flags NIL is a known legacy session; a missing
+instance means an older peer or unknown capabilities. Keypad identity
+means the protocol can report provenance, not that every key/lock state
+is distinguishable. Each key event remains authoritative."
+  (keyboard-disambiguation nil :type boolean :read-only t)
+  (alternate-key-reporting nil :type boolean :read-only t)
+  (keypad-identity nil :type boolean :read-only t))
+
 ;;; The relay
 
 (defclass relay ()
@@ -56,6 +73,14 @@ supplies it, and returns the `seq' it gave the message: messages are
 numbered as they are written, in wire order (ADR 0013).")
    (display-width :initform 80 :accessor relay-display-width)
    (display-height :initform 24 :accessor relay-display-height)
+   (terminal-capabilities
+    :initarg :terminal-capabilities
+    :initform nil
+    :reader relay-terminal-capabilities
+    :documentation "The immutable terminal-capabilities reported by Hello,
+or NIL for an older peer or unknown capabilities. A present all-false
+value is a known legacy session. Read after the handshake, including in
+init.lisp, without depending on the protobuf codec.")
    (foreground
     :initform (lem:make-color #xdd #xdd #xdd)
     :accessor relay-foreground
@@ -100,6 +125,22 @@ A mixin, not a subclass of `lem:implementation': Lem offers each direct
 subclass of that as an interface to run, and this one cannot run alone.
 The concrete class combines it with `lem:implementation', and a codec
 gives it a sink and an event loop (`lem-if:invoke')."))
+
+(lem:define-command describe-terminal-capabilities () ()
+  "Show the display's confirmed keyboard capabilities for this session.
+Unknown means the display did not advertise capabilities. A legacy
+session advertises all features as unavailable; keypad provenance still
+comes from individual key events. This command never runs at startup."
+  (let* ((implementation (lem:implementation))
+         (capabilities (and (typep implementation 'relay)
+                            (relay-terminal-capabilities implementation))))
+    (lem:display-popup-message
+     (if capabilities
+         (format nil "Terminal keyboard capabilities~%~%Disambiguation: ~:[no~;yes~]~%Alternate keys: ~:[no~;yes~]~%Keypad identity: ~:[no~;yes~]~%~%Keypad identity describes protocol support; each key event is authoritative."
+                 (terminal-capabilities-keyboard-disambiguation capabilities)
+                 (terminal-capabilities-alternate-key-reporting capabilities)
+                 (terminal-capabilities-keypad-identity capabilities))
+         "Terminal keyboard capabilities: unknown (not advertised by this display)."))))
 
 (defun send (relay message)
   "Hand MESSAGE to the sink; return the `seq' it was sent as, or NIL when

@@ -23,7 +23,7 @@ use std::io::{self, Read, Write};
 use prost::Message;
 
 /// The revision of this schema this crate was built against (`Hello`).
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Read one length-delimited message body. `Ok(None)` means the stream
 /// ended cleanly, between messages.
@@ -81,6 +81,7 @@ mod tests {
             message: Some(to_editor::Message::Key(Key {
                 code: Some(key::Code::Text(text.into())),
                 modifiers: vec![Modifier::Ctrl as i32],
+                keypad: false,
             })),
         }
     }
