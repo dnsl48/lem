@@ -9,6 +9,9 @@
            :relay-display-height
            :relay-foreground
            :relay-background
+           :relay-editor-thread
+           :relay-mouse-x
+           :relay-mouse-y
            :set-display-size
            :set-clipboard
            :set-clipboard-text
@@ -60,6 +63,13 @@ falls back to it for attributes without one.")
     :documentation "Lem's default background as a colour, never NIL: Lem
 decides light or dark theme mode from it.")
    (cursor-shape :initform :box :accessor relay-cursor-shape)
+   (editor-thread
+    :initform nil
+    :accessor relay-editor-thread
+    :documentation "Lem's editor thread, recorded by the codec's
+`lem-if:invoke' when it starts it; abort interrupts it.")
+   (mouse-x :initform -1 :accessor relay-mouse-x)
+   (mouse-y :initform -1 :accessor relay-mouse-y)
    (painted
     :initform '()
     :accessor relay-painted
@@ -119,6 +129,9 @@ gives it a sink and an event loop (`lem-if:invoke')."))
 
 (defmethod lem-if:get-background-color ((relay relay))
   (relay-background relay))
+
+(defmethod lem-if:get-mouse-position ((relay relay))
+  (values (relay-mouse-x relay) (relay-mouse-y relay)))
 
 (defmethod lem-if:update-foreground ((relay relay) color-name)
   ;; As ncurses: the new default is what later questions get answered
