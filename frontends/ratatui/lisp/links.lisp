@@ -15,7 +15,7 @@ Set to NIL in init.lisp to draw them as plain text.")
 ;;; over each web address, whose attribute sets only `lem:attribute-link'.
 ;;; Lem merges overlays over the text's own attributes when drawing, so
 ;;; the text looks as it always did, in every theme, and the relay reads
-;;; the URL off the merged attribute (`lem-relay/frame:relayed-link').
+;;; the URL off the merged attribute (`lem-display-relay/frame:relayed-link').
 ;;;
 ;;; The addresses are found here, not taken from Lem's `link-mode': that is
 ;;; on only in some buffers (Lisp, shell, the first one), and Markdown puts

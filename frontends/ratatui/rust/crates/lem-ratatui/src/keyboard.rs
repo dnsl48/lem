@@ -11,7 +11,7 @@ use crossterm::Command;
 use crossterm::event::{
     KeyboardEnhancementFlags as Flags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use lem_protocol::v1::TerminalCapabilities;
+use lem_protocols::display::v1::TerminalCapabilities;
 
 const BUDGET: Duration = Duration::from_secs(1);
 

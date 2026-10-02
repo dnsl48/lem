@@ -6,7 +6,7 @@
 ;;; So an init.lisp shared with other frontends can say #+lem-ratatui.
 (pushnew :lem-ratatui *features*)
 
-(defclass ratatui (lem-relay/relay:relay lem-core:implementation)
+(defclass ratatui (lem-display-relay/relay:relay lem-core:implementation)
   ()
   (:default-initargs
    :name :ratatui
@@ -44,7 +44,7 @@
    :underline-color-support nil)
   (:documentation "Frontend implementation for the Rust/Ratatui display process.
 
-Every `lem-if:*' drawing method comes from `lem-relay/relay:relay' (ADR
+Every `lem-if:*' drawing method comes from `lem-display-relay/relay:relay' (ADR
 0009), and `lem-if:invoke' from lisp/main.lisp. This class sets the
 capability flags, where a terminal differs from a browser.
 

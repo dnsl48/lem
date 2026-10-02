@@ -25,7 +25,7 @@ use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
-use lem_protocol::v1::TerminalCapabilities;
+use lem_protocols::display::v1::TerminalCapabilities;
 
 use crate::keyboard;
 use crossterm::execute;

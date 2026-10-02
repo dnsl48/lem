@@ -1,29 +1,15 @@
-//! `lem.relay.v1`: the protocol between `lem-relay` and a display.
-//!
-//! The types are generated from `frontends/ratatui/proto/lem/relay/v1/relay.proto`
-//! by `build.rs`; the schema, with its comments, is the reference. This
-//! module adds only what `prost` leaves to its user: framing on a stream.
+//! Framing on a stream, the same for every link.
 //!
 //! Each message is framed with protobuf's standard length-delimited format,
 //! a varint byte length and then the message, which `prost` produces with
-//! `encode_length_delimited` and the Lisp half with
-//! `lem-relay/protobuf/framing`. `prost` decodes the format from a buffer;
-//! a pipe has to be read up to the end of the length first, which is what
-//! [`read_delimited`] does.
-
-mod generated {
-    // Generated code: its style is prost's, not ours.
-    #![allow(clippy::all)]
-    include!(concat!(env!("OUT_DIR"), "/lem.relay.v1.rs"));
-}
-pub use generated::*;
+//! `encode_length_delimited` and the Lisp side with
+//! `lem-display-relay/protobuf/framing`. `prost` decodes the format from a
+//! buffer; a pipe has to be read up to the end of the length first, which is
+//! what [`read_delimited`] does.
 
 use std::io::{self, Read, Write};
 
 use prost::Message;
-
-/// The revision of this schema this crate was built against (`Hello`).
-pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Read one length-delimited message body. `Ok(None)` means the stream
 /// ended cleanly, between messages.
@@ -73,6 +59,7 @@ pub fn write_delimited(writer: &mut impl Write, message: &impl Message) -> io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::v1::{Key, Modifier, ToEditor, key, to_editor};
 
     fn key(seq: u64, text: &str) -> ToEditor {
         ToEditor {
@@ -119,14 +106,5 @@ mod tests {
             read_delimited(&mut &[0x80u8][..]).is_err(),
             "cut inside the length"
         );
-    }
-
-    #[test]
-    fn the_schemas_enums_lose_their_prefixes() {
-        // relay.proto prefixes enum values with their type, as protobuf
-        // advises; prost strips the prefix.
-        assert_eq!(ViewKind::Floating as i32, 3);
-        assert_eq!(NamedKey::PageUp as i32, 13);
-        assert_eq!(CursorShape::Bar as i32, 2);
     }
 }

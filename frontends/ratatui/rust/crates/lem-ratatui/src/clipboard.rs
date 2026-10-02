@@ -1,7 +1,7 @@
 //! System clipboard access.
 //!
 //! The relay asks with `ClipboardRequest` and waits **0.1 seconds** for the
-//! reply (`*clipboard-timeout*` in `relay/relay.lisp`, as lem-server did).
+//! reply (`*clipboard-timeout*` in `display-relay/relay.lisp`, as lem-server did).
 //! Missing that deadline is not fatal — the paste simply yields nothing —
 //! but it does mean the read has to be synchronous and quick rather than
 //! handed to a thread.

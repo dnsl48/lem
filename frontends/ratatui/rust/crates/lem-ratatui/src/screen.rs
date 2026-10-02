@@ -1,6 +1,6 @@
 //! What the display knows between frames, and how a frame changes it.
 
-use lem_protocol::v1::{self, CursorShape, op};
+use lem_protocols::display::v1::{self, CursorShape, op};
 use ratatui_core::layout::Position;
 use ratatui_core::style::Color;
 

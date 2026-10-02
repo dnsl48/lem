@@ -7,7 +7,7 @@
 //! (`ViewsStacked`, ADR 0012). See `../../../docs/protocol-notes.md`
 //! section 7.
 
-use lem_protocol::v1::{self, BorderShape, ViewKind};
+use lem_protocols::display::v1::{self, BorderShape, ViewKind};
 
 use crate::paint::Layer;
 use ratatui_core::layout::Rect;

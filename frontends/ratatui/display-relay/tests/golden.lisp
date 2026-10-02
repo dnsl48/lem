@@ -1,9 +1,9 @@
-(defpackage :lem-relay/tests/golden
-  (:use :cl :rove :lem-relay/input)
-  (:local-nicknames (:framing :lem-relay/protobuf/framing)
-                    (:codec :lem-relay/protobuf/codec)
-                    (:relay :lem-relay/relay)))
-(in-package :lem-relay/tests/golden)
+(defpackage :lem-display-relay/tests/golden
+  (:use :cl :rove :lem-display-relay/input)
+  (:local-nicknames (:framing :lem-display-relay/protobuf/framing)
+                    (:codec :lem-display-relay/protobuf/codec)
+                    (:relay :lem-display-relay/relay)))
+(in-package :lem-display-relay/tests/golden)
 
 ;;; The Rust → Lisp golden test. proto/fixtures/display-inputs.v1.bin is
 ;;; what the display sends for a fixed session, built by lem-ratatui's own
@@ -13,7 +13,7 @@
 (defun fixture-requests ()
   "Every message in the fixture, decoded, in order."
   (with-open-file (in (asdf:system-relative-pathname
-                       "lem-relay" "../proto/fixtures/display-inputs.v1.bin")
+                       "lem-display-relay" "../proto/fixtures/display-inputs.v1.bin")
                       :element-type '(unsigned-byte 8))
     (loop :for body := (framing:read-delimited in)
           :while body
@@ -77,36 +77,36 @@
   (let ((relay (make-instance 'golden-relay))
         (presses (remove-if-not (lambda (input)
                                   (and (typep input 'mouse-input)
-                                       (eq :down (lem-relay/input::mouse-input-action input))))
+                                       (eq :down (lem-display-relay/input::mouse-input-action input))))
                                 (inputs))))
     (ok (= 2 (length presses)))
     (dolist (press presses)
       (deliver relay press))
-    (ok (= 2 (lem-relay/input::press-clicks (relay:relay-last-press relay))))
+    (ok (= 2 (lem-display-relay/input::press-clicks (relay:relay-last-press relay))))
     (loop :while (plusp (lem:event-queue-length))
           :do (ignore-errors (lem:receive-event 0)))))
 
 (deftest the-rest-of-the-mouse-decodes
   (let ((mouse (remove-if-not (lambda (input) (typep input 'mouse-input)) (inputs))))
-    (flet ((action (input) (lem-relay/input::mouse-input-action input)))
+    (flet ((action (input) (lem-display-relay/input::mouse-input-action input)))
       (let ((drag (find :move mouse :key #'action))
             (wheel (find :wheel mouse :key #'action)))
-        (ok (eq :right (lem-relay/input::mouse-input-button drag)) "a drag holds its button")
-        (ok (= 1 (lem-relay/input::mouse-input-wheel-y wheel)) "positive is up")
-        (ok (equal '(7 3) (list (lem-relay/input::mouse-input-x wheel)
-                                (lem-relay/input::mouse-input-y wheel))))))))
+        (ok (eq :right (lem-display-relay/input::mouse-input-button drag)) "a drag holds its button")
+        (ok (= 1 (lem-display-relay/input::mouse-input-wheel-y wheel)) "positive is up")
+        (ok (equal '(7 3) (list (lem-display-relay/input::mouse-input-x wheel)
+                                (lem-display-relay/input::mouse-input-y wheel))))))))
 
 (deftest paste-resize-and-clipboard-replies
   (let ((inputs (inputs)))
-    (ok (equal "pasted" (lem-relay/input::paste-input-text
+    (ok (equal "pasted" (lem-display-relay/input::paste-input-text
                          (find-if (lambda (i) (typep i 'paste-input)) inputs))))
     (let ((resize (find-if (lambda (i) (typep i 'resize-input)) inputs)))
-      (ok (equal '(120 40) (list (lem-relay/input::resize-input-width resize)
-                                 (lem-relay/input::resize-input-height resize)))))
+      (ok (equal '(120 40) (list (lem-display-relay/input::resize-input-width resize)
+                                 (lem-display-relay/input::resize-input-height resize)))))
     (let ((replies (remove-if-not (lambda (i) (typep i 'clipboard-reply)) inputs)))
       (ok (equal '((7 "from the display") (8 nil))
                  (mapcar (lambda (reply)
-                           (list (lem-relay/input::clipboard-reply-reply-to reply)
-                                 (lem-relay/input::clipboard-reply-text reply)))
+                           (list (lem-display-relay/input::clipboard-reply-reply-to reply)
+                                 (lem-display-relay/input::clipboard-reply-text reply)))
                          replies))
           "an absent text is no text, not an empty one"))))

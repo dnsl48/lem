@@ -1,12 +1,12 @@
-(defpackage :lem-relay/tests/protobuf
-  (:use :cl :rove :lem-relay/frame :lem-relay/input)
-  (:local-nicknames (:pb :cl-protobufs.lem.relay.v1)
+(defpackage :lem-display-relay/tests/protobuf
+  (:use :cl :rove :lem-display-relay/frame :lem-display-relay/input)
+  (:local-nicknames (:pb :cl-protobufs.lem.display.v1)
                     (:proto :cl-protobufs)
-                    (:framing :lem-relay/protobuf/framing)
-                    (:codec :lem-relay/protobuf/codec)
-                    (:serve :lem-relay/protobuf/serve)
-                    (:relay :lem-relay/relay)))
-(in-package :lem-relay/tests/protobuf)
+                    (:framing :lem-display-relay/protobuf/framing)
+                    (:codec :lem-display-relay/protobuf/codec)
+                    (:serve :lem-display-relay/protobuf/serve)
+                    (:relay :lem-display-relay/relay)))
+(in-package :lem-display-relay/tests/protobuf)
 
 ;;; Framing
 
@@ -226,18 +226,18 @@
         (drag (decoded-input :mouse (pb:make-mouse :x 3 :y 4
                                                    :move (pb:make-move :button :button-right))))
         (wheel (decoded-input :mouse (pb:make-mouse :x 3 :y 4 :wheel (pb:make-wheel :dy -1)))))
-    (ok (eq :down (lem-relay/input::mouse-input-action press)))
-    (ok (eq :left (lem-relay/input::mouse-input-button press)))
-    (ok (null (lem-relay/input::mouse-input-button move)) "a plain move has no button")
-    (ok (eq :right (lem-relay/input::mouse-input-button drag)) "a drag does")
-    (ok (= -1 (lem-relay/input::mouse-input-wheel-y wheel)))))
+    (ok (eq :down (lem-display-relay/input::mouse-input-action press)))
+    (ok (eq :left (lem-display-relay/input::mouse-input-button press)))
+    (ok (null (lem-display-relay/input::mouse-input-button move)) "a plain move has no button")
+    (ok (eq :right (lem-display-relay/input::mouse-input-button drag)) "a drag does")
+    (ok (= -1 (lem-display-relay/input::mouse-input-wheel-y wheel)))))
 
 (deftest a-clipboard-reply-may-have-no-text
   (let ((with (decoded-input :clipboard-reply (pb:make-clipboard-reply :reply-to 4 :text "hi")))
         (without (decoded-input :clipboard-reply (pb:make-clipboard-reply :reply-to 5))))
-    (ok (equal "hi" (lem-relay/input::clipboard-reply-text with)))
-    (ok (= 4 (lem-relay/input::clipboard-reply-reply-to with)))
-    (ok (null (lem-relay/input::clipboard-reply-text without)))))
+    (ok (equal "hi" (lem-display-relay/input::clipboard-reply-text with)))
+    (ok (= 4 (lem-display-relay/input::clipboard-reply-reply-to with)))
+    (ok (null (lem-display-relay/input::clipboard-reply-text without)))))
 
 (deftest a-hello-decodes
   (ok (equal '(:hello 1 1 "s" 100 30 nil #x101010 nil)

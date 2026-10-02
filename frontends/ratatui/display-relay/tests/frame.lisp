@@ -1,6 +1,6 @@
-(defpackage :lem-relay/tests/frame
-  (:use :cl :rove :lem-relay/frame))
-(in-package :lem-relay/tests/frame)
+(defpackage :lem-display-relay/tests/frame
+  (:use :cl :rove :lem-display-relay/frame))
+(in-package :lem-display-relay/tests/frame)
 
 (defun put (view y text &key style)
   (make-text-put :view view :x 0 :y y :text text :width (length text) :style style))

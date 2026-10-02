@@ -1,6 +1,6 @@
 //! Terminal display half for Lem.
 //!
-//! This process owns the terminal. It speaks `lem.relay.v1` over its own
+//! This process owns the terminal. It speaks `lem.display.v1` over its own
 //! stdio (`frontends/ratatui/proto`), paints the frames it is sent into
 //! per-view cell buffers, composites them, and draws, with the terminal's
 //! own cursor where Lem's is. Starting Lem and connecting the two is
@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
-use lem_protocol::v1::{self, to_display, to_editor};
+use lem_protocols::display::v1::{self, to_display, to_editor};
 use paint::Layer;
 use present::Presenter;
 use screen::Screen;

@@ -1,20 +1,21 @@
 //! What the Lisp relay sends, decoded here: the Lisp → Rust golden test.
 //!
 //! `proto/fixtures/relay-session.v1.bin` is written by
-//! `scripts/capture-relay-v1.lisp`, which runs the real editor through
-//! `lem-relay/protobuf`: typing non-ASCII and CJK text, splitting a window,
+//! `scripts/capture-display-v1.lisp`, which runs the real editor through
+//! `lem-display-relay/protobuf`: typing non-ASCII and CJK text, splitting a window,
 //! opening a popup, setting a theme background and a bar cursor, copying.
 //! `relay-session.v1.txt` beside it is the same in text format, for review.
 
 use std::collections::HashSet;
 
-use lem_protocol::v1::{self, CursorShape, ViewKind, op, to_display};
+use lem_protocols::display::v1::{self, CursorShape, ViewKind, op, to_display};
+use lem_protocols::framing;
 use prost::Message;
 
 fn messages() -> Vec<v1::ToDisplay> {
     let mut wire: &[u8] = include_bytes!("../../../../proto/fixtures/relay-session.v1.bin");
     let mut messages = Vec::new();
-    while let Some(body) = v1::read_delimited(&mut wire).expect("well-framed") {
+    while let Some(body) = framing::read_delimited(&mut wire).expect("well-framed") {
         messages.push(v1::ToDisplay::decode(body.as_slice()).expect("a ToDisplay"));
     }
     messages

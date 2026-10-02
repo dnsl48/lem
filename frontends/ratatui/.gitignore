@@ -2,5 +2,5 @@
 __pycache__/
 /toolchain
 # The repo root ignores anything named `lem` (the built binary); the schema
-# lives under proto/lem/ because its path mirrors package lem.relay.v1.
+# lives under proto/lem/ because its path mirrors package lem.display.v1.
 !/proto/lem/

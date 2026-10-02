@@ -61,7 +61,7 @@ merely because logging is on."
 (defun make-protocol-stream (fd &key input output)
   "Return an octet stream on FD.
 
-Bytes, not characters: the protocol is binary (lem-relay/protobuf), so
+Bytes, not characters: the protocol is binary (lem-display-relay/protobuf), so
 no stream external format, the locale's or any other, stands between the
 wire and the codec."
   (sb-sys:make-fd-stream fd

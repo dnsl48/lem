@@ -1,10 +1,10 @@
-(defpackage :lem-relay/protobuf/framing
+(defpackage :lem-display-relay/protobuf/framing
   (:use :cl)
   (:export :write-delimited
            :read-delimited))
-(in-package :lem-relay/protobuf/framing)
+(in-package :lem-display-relay/protobuf/framing)
 
-;;; Protobuf's standard length-delimited framing (relay.proto): a varint
+;;; Protobuf's standard length-delimited framing (display.proto): a varint
 ;;; byte length, then the message. prost reads it with
 ;;; decode_length_delimited. Only the framing is written here; the
 ;;; messages themselves are cl-protobufs' to encode (ADR 0010).

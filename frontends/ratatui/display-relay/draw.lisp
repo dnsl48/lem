@@ -1,12 +1,12 @@
-(defpackage :lem-relay/draw
-  (:use :cl :lem-relay/frame :lem-relay/view)
+(defpackage :lem-display-relay/draw
+  (:use :cl :lem-display-relay/frame :lem-display-relay/view)
   (:local-nicknames (:display :lem-core/display))
   (:export :object-width
            :object-puts
            :render-line
            :render-line-on-modeline
            :clear-to-end-of-window))
-(in-package :lem-relay/draw)
+(in-package :lem-display-relay/draw)
 
 (defvar *unknown-classes* (make-hash-table :test 'eq)
   "Drawing-object classes already reported as unknown, so each is logged
@@ -68,7 +68,7 @@ a second value whether OBJECT is where the cursor is.")
     (let ((class (class-name (class-of object))))
       (unless (gethash class *unknown-classes*)
         (setf (gethash class *unknown-classes*) t)
-        (log:warn "lem-relay: not drawing unknown drawing object ~S" class)))
+        (log:warn "lem-display-relay: not drawing unknown drawing object ~S" class)))
     '())
   (:method ((object display:void-object) x y view)
     (declare (ignore x y view))

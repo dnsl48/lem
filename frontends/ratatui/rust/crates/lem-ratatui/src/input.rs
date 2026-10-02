@@ -1,4 +1,4 @@
-//! crossterm events to `lem.relay.v1` input.
+//! crossterm events to `lem.display.v1` input.
 //!
 //! The display describes what happened and the relay turns it into what
 //! Lem consumes (ADR 0013, 0014): which key, which modifiers, which mouse
@@ -8,7 +8,7 @@
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventState, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use lem_protocol::v1::{self, NamedKey, key, mouse};
+use lem_protocols::display::v1::{self, NamedKey, key, mouse};
 
 /// Describe a key event, or `None` for a key the protocol has no word for.
 ///
