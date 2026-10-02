@@ -16,18 +16,27 @@
    (output :initarg :output :reader channel-output)
    (lock :initform (bt2:make-lock :name "lem-ipc-channels output") :reader channel-lock)
    (seq :initform 0 :accessor channel-seq)
-   (closer :initarg :closer :initform nil :reader channel-closer))
+   (shutdown :initarg :shutdown :initform nil :reader channel-shutdown)
+   (closer :initarg :closer :initform nil :reader channel-closer)
+   (reader-started-p :initform nil :accessor channel-reader-started-p))
   (:documentation "One peer process over a pair of octet streams. Messages
 are framed length-delimited and numbered from 1 in wire order, whichever
 thread sends (ADR 0013). What a message is belongs to the link: a channel
-moves octet vectors."))
+moves octet vectors.
 
-(defun make-channel (input output &key closer)
+Closing is split into waking (SHUTDOWN) and releasing (CLOSER) so that
+the descriptor is never closed while a reader thread might still be
+polling it: see `close-channel' and `start-reader'."))
+
+(defun make-channel (input output &key closer shutdown)
   "A channel reading the octet stream INPUT and writing OUTPUT. CLOSER, a
-function of no arguments, is what `close-channel' calls to release what
-the streams were made from; without one, closing does nothing, as for
-stdio, which the process owns."
-  (make-instance 'channel :input input :output output :closer closer))
+function of no arguments, is what releases what the streams were made
+from; without one, closing does nothing, as for stdio, which the process
+owns. SHUTDOWN, also a function of no arguments, wakes a reader blocked
+on INPUT without releasing anything; without one, `close-channel' on a
+channel with a running reader (`start-reader') just waits for that
+reader to notice the stream has failed on its own."
+  (make-instance 'channel :input input :output output :closer closer :shutdown shutdown))
 
 (defun channel-send (channel encode)
   "Number the next message, write what ENCODE, a function of that number,
@@ -42,16 +51,42 @@ so it may keep state that must follow wire order."
   "The next message from the peer, an octet vector, or NIL when it hung up."
   (framing:read-delimited (channel-input channel)))
 
-(defun close-channel (channel)
-  "End CHANNEL: a reader blocked on it sees the end, and later sends fail."
+(defun release-channel (channel)
+  "Free what CHANNEL's streams were made from, via its CLOSER. A channel
+with none (stdio, which the process owns, or an in-memory one, as in
+tests) does nothing. Called by `close-channel' directly when CHANNEL
+never had a reader started on it, and otherwise by that reader itself
+once its loop ends; never both, and never while a reader might still be
+polling the descriptor."
   (alexandria:when-let ((closer (channel-closer channel)))
     (ignore-errors (funcall closer))))
 
+(defun close-channel (channel)
+  "End CHANNEL: a reader blocked on it sees the end, and later sends fail.
+Wakes a reader via SHUTDOWN, if CHANNEL has one, which only marks the
+descriptor as done, not released. The descriptor itself is released
+right here only when CHANNEL never had a reader started on it
+(`start-reader'); otherwise that reader releases it itself once its own
+loop ends, so it is never closed while that thread might still be
+polling it."
+  (alexandria:when-let ((shutdown (channel-shutdown channel)))
+    (ignore-errors (funcall shutdown)))
+  (unless (bt2:with-lock-held ((channel-lock channel))
+            (channel-reader-started-p channel))
+    (release-channel channel)))
+
 (defun start-reader (channel handler &key (name "lem-ipc-channels reader") on-close)
   "Read CHANNEL on a new thread named NAME, calling HANDLER with each
-message, until the peer hangs up or the stream fails; then call ON-CLOSE.
-An error in HANDLER is logged and reading goes on: one bad message does
-not end the link. Returns the thread."
+message, until the peer hangs up or the stream fails; then release
+CHANNEL (see `close-channel') and call ON-CLOSE. An error in HANDLER is
+logged and reading goes on: one bad message does not end the link.
+
+Marks CHANNEL as having a reader before this thread is even started, so
+that a `close-channel' racing with this call always sees it and leaves
+the descriptor for this thread to release, rather than closing it out
+from under a read that may already be under way. Returns the thread."
+  (bt2:with-lock-held ((channel-lock channel))
+    (setf (channel-reader-started-p channel) t))
   (bt2:make-thread
    (lambda ()
      (unwind-protect
@@ -63,6 +98,7 @@ not end the link. Returns the thread."
                             (log:error "~A: failed to handle a message: ~A" name condition))))
             (error (condition)
               (log:info "~A: the stream failed: ~A" name condition)))
+       (release-channel channel)
        (when on-close
          (funcall on-close))))
    :name name))
@@ -74,7 +110,12 @@ not end the link. Returns the thread."
 (defun socket-channel (socket)
   "A channel on the connected local SOCKET. One fd-stream each way on the
 socket's descriptor, so the reader and the writers never share a stream;
-neither closes the descriptor, which the closer does with the socket."
+neither closes the descriptor. Waking and releasing SOCKET are kept
+separate (see `close-channel'): shutting down wakes a reader blocked in
+read() with a clean end, without touching the descriptor a poll of that
+same read() may still be about to look at; closing frees it, and is left
+to that reader to do once its own loop has actually ended, never to a
+shutdown racing against it."
   (let ((fd (sb-bsd-sockets:socket-file-descriptor socket)))
     (make-channel (sb-sys:make-fd-stream fd :input t :auto-close nil
                                             :element-type '(unsigned-byte 8)
@@ -82,18 +123,9 @@ neither closes the descriptor, which the closer does with the socket."
                   (sb-sys:make-fd-stream fd :output t :auto-close nil
                                             :element-type '(unsigned-byte 8)
                                             :buffering :full)
+                  :shutdown (lambda ()
+                              (sb-bsd-sockets:socket-shutdown socket :direction :io))
                   :closer (lambda ()
-                            ;; Shutting down first wakes a reader blocked in
-                            ;; read(), which closing alone does not. A beat
-                            ;; afterwards lets that wakeup actually run its
-                            ;; read() before the descriptor goes away under
-                            ;; it: closing right on shutdown's heels can
-                            ;; still win the race against a reader that
-                            ;; hasn't reached its own read() yet, which some
-                            ;; runtimes answer with EBADF instead of the
-                            ;; clean end shutdown promised.
-                            (ignore-errors (sb-bsd-sockets:socket-shutdown socket :direction :io))
-                            (sleep 0.001)
                             (sb-bsd-sockets:socket-close socket)))))
 
 (defun connect-local (path &key (timeout 1) (interval 0.02))

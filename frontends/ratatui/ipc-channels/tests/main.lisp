@@ -65,7 +65,7 @@
   (let ((replies (ipc:make-replies))
         (start (get-internal-real-time)))
     (ok (equal '(nil nil) (multiple-value-list (ipc:await-reply replies 1 0.05))))
-    (ok (<= 0.05 (/ (- (get-internal-real-time) start) internal-time-units-per-second))
+    (ok (<= 1/20 (/ (- (get-internal-real-time) start) internal-time-units-per-second))
         "it waited out the timeout")))
 
 (deftest a-reply-from-another-thread-wakes-the-waiter
