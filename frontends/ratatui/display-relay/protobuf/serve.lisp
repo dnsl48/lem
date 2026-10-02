@@ -1,11 +1,11 @@
-(defpackage :lem-relay/protobuf/serve
+(defpackage :lem-display-relay/protobuf/serve
   (:use :cl)
-  (:local-nicknames (:framing :lem-relay/protobuf/framing)
-                    (:codec :lem-relay/protobuf/codec)
-                    (:relay :lem-relay/relay)
-                    (:input :lem-relay/input))
+  (:local-nicknames (:framing :lem-display-relay/protobuf/framing)
+                    (:codec :lem-display-relay/protobuf/codec)
+                    (:relay :lem-display-relay/relay)
+                    (:input :lem-display-relay/input))
   (:export :serve))
-(in-package :lem-relay/protobuf/serve)
+(in-package :lem-display-relay/protobuf/serve)
 
 (defun send-numbered (output lock state encode)
   "Number the next outgoing message, write what ENCODE makes of that
@@ -29,7 +29,7 @@ be served, having told it why with `Exit'."
                    (lambda (seq)
                      (codec:exit-message seq "Hello carried no protocol_version.")))
     (return-from hello nil))
-  (log:info "lem-relay/protobuf: session ~A, display protocol revision ~D, terminal colours ~A on ~A"
+  (log:info "lem-display-relay/protobuf: session ~A, display protocol revision ~D, terminal colours ~A on ~A"
             session-id version
             (if foreground (format nil "#~6,'0X" foreground) "unknown")
             (if background (format nil "#~6,'0X" background) "unknown"))
@@ -49,7 +49,7 @@ be served, having told it why with `Exit'."
   t)
 
 (defun serve (relay function &key input output)
-  "Run Lem with RELAY, speaking lem.relay.v1 (relay.proto) on the octet
+  "Run Lem with RELAY, speaking lem.display.v1 (display.proto) on the octet
 streams INPUT and OUTPUT, until the editor exits or the display hangs up.
 The body of an implementation's `lem-if:invoke'; FUNCTION is what Lem
 hands that. Returns the editor's crash report, if it left one.
@@ -60,8 +60,8 @@ ends the loop. The editor waits for `Hello', which carries the screen's
 size, and sends its first frame unasked: there is no `redraw' step
 (ADR 0011). When the editor exits, the display gets `Exit' before the
 stream ends. Writes from both threads are serialised and numbered."
-  (let ((lock (bt2:make-lock :name "lem-relay/protobuf output"))
-        (ready (bt2:make-semaphore :name "lem-relay/protobuf hello"))
+  (let ((lock (bt2:make-lock :name "lem-display-relay/protobuf output"))
+        (ready (bt2:make-semaphore :name "lem-display-relay/protobuf hello"))
         (state (codec:make-codec-state))
         (reader (bt2:current-thread)))
     (setf (relay:relay-sink relay)
@@ -89,7 +89,7 @@ stream ends. Writes from both threads are serialised and numbered."
                            (return)))
                         (:input (input:deliver relay (second request)))
                         (:ignored
-                         (log:info "lem-relay/protobuf: ignoring a message this revision does not know"))))
+                         (log:info "lem-display-relay/protobuf: ignoring a message this revision does not know"))))
                   (error (condition)
-                    (log:error "lem-relay/protobuf: failed to handle a message: ~A" condition))))
+                    (log:error "lem-display-relay/protobuf: failed to handle a message: ~A" condition))))
       nil)))

@@ -1,7 +1,7 @@
-(defpackage :lem-relay/tests/draw
-  (:use :cl :rove :lem-relay/frame :lem-relay/view :lem-relay/draw)
+(defpackage :lem-display-relay/tests/draw
+  (:use :cl :rove :lem-display-relay/frame :lem-display-relay/view :lem-display-relay/draw)
   (:local-nicknames (:display :lem-core/display)))
-(in-package :lem-relay/tests/draw)
+(in-package :lem-display-relay/tests/draw)
 
 (defun a-view (&key (width 20) (height 5))
   (make-view :id 7 :x 0 :y 0 :width width :height height :kind :tile))

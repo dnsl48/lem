@@ -1,4 +1,4 @@
-(defpackage :lem-relay/view
+(defpackage :lem-display-relay/view
   (:use :cl)
   (:export :view
            :make-view
@@ -12,7 +12,7 @@
            :view-modeline-p
            :view-border
            :view-border-shape))
-(in-package :lem-relay/view)
+(in-package :lem-display-relay/view)
 
 (defstruct (view (:constructor make-view
                      (&key id window x y width height kind modeline-p

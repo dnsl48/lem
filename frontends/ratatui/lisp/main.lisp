@@ -11,10 +11,10 @@
 (in-package :lem-ratatui)
 
 (defmethod lem-if:invoke ((ratatui ratatui) function)
-  "Run the editor, relaying it over the protocol streams in lem.relay.v1.
+  "Run the editor, relaying it over the protocol streams in lem.display.v1.
 A crash report the editor leaves also reaches the display, in `Exit';
 here it goes to the log, since stdout is the wire."
-  (alexandria:when-let ((report (lem-relay/protobuf/serve:serve ratatui function
+  (alexandria:when-let ((report (lem-display-relay/protobuf/serve:serve ratatui function
                                                                 :input *protocol-input*
                                                                 :output *protocol-output*)))
     (format *log-stream* "~&~A~%" report)

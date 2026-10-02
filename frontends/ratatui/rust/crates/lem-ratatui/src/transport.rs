@@ -13,7 +13,8 @@ use std::io::{self, BufReader, BufWriter, Stdin, Stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use lem_protocol::v1::{self, to_editor};
+use lem_protocols::display::v1::{self, to_editor};
+use lem_protocols::framing;
 use prost::Message;
 
 /// The protocol stream coming from Lem.
@@ -64,7 +65,7 @@ pub struct Received {
 impl LemReader {
     /// Read the next message. `Ok(None)` means Lem hung up.
     pub fn recv(&mut self) -> Result<Option<Received>> {
-        let Some(body) = v1::read_delimited(&mut self.stdin)? else {
+        let Some(body) = framing::read_delimited(&mut self.stdin)? else {
             return Ok(None);
         };
         let started = Instant::now();
@@ -87,7 +88,7 @@ impl LemWriter {
             time_us: u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX),
             message: Some(message),
         };
-        v1::write_delimited(&mut self.stdout, &envelope)?;
+        framing::write_delimited(&mut self.stdout, &envelope)?;
         Ok(self.seq)
     }
 }

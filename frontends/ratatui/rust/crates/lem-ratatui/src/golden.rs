@@ -3,7 +3,7 @@
 //! Builds a `ToEditor` sequence through the display's own conversions
 //! (`input::key`, `input::mouse`) and compares it with
 //! `proto/fixtures/display-inputs.v1.bin`, which the Lisp half decodes in
-//! `relay/tests/golden.lisp` and checks against what Lem receives: key
+//! `display-relay/tests/golden.lisp` and checks against what Lem receives: key
 //! names, modifiers, click counts from the timestamps.
 //!
 //! After an intended change, rewrite the fixture and review its text twin:
@@ -16,7 +16,8 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
 };
-use lem_protocol::v1::{self, to_editor};
+use lem_protocols::display::v1::{self, to_editor};
+use lem_protocols::framing;
 
 use crate::input;
 
@@ -155,7 +156,7 @@ fn golden_display_inputs_are_current() {
     let envelopes = envelopes();
     let mut wire = Vec::new();
     for envelope in &envelopes {
-        v1::write_delimited(&mut wire, envelope).unwrap();
+        framing::write_delimited(&mut wire, envelope).unwrap();
     }
     let path = fixtures().join("display-inputs.v1.bin");
     if std::env::var_os("LEM_UPDATE_FIXTURES").is_some() {

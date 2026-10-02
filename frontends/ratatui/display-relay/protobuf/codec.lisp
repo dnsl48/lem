@@ -1,8 +1,8 @@
-(defpackage :lem-relay/protobuf/codec
-  (:use :cl :lem-relay/frame :lem-relay/input)
-  (:local-nicknames (:pb :cl-protobufs.lem.relay.v1)
+(defpackage :lem-display-relay/protobuf/codec
+  (:use :cl :lem-display-relay/frame :lem-display-relay/input)
+  (:local-nicknames (:pb :cl-protobufs.lem.display.v1)
                     (:proto :cl-protobufs))
-  (:import-from :lem-relay/relay
+  (:import-from :lem-display-relay/relay
    :set-clipboard
    :set-clipboard-text
    :clipboard-request)
@@ -16,10 +16,10 @@
            :exit-message
            :decode
            :key-name))
-(in-package :lem-relay/protobuf/codec)
+(in-package :lem-display-relay/protobuf/codec)
 
 (defconstant +protocol-version+ 2
-  "The revision of lem.relay.v1 this codec speaks (relay.proto, `Hello').")
+  "The revision of lem.display.v1 this codec speaks (display.proto, `Hello').")
 
 (defparameter *named-keys*
   '((:named-key-enter . "Return")
@@ -249,7 +249,7 @@ anything else, now."
   "Decode Hello's presence separately from its default-false flags."
   (when (pb:hello.has-capabilities hello)
     (let ((capabilities (pb:hello.capabilities hello)))
-      (lem-relay/relay:make-terminal-capabilities
+      (lem-display-relay/relay:make-terminal-capabilities
        :keyboard-disambiguation (pb:terminal-capabilities.keyboard-disambiguation capabilities)
        :alternate-key-reporting (pb:terminal-capabilities.alternate-key-reporting capabilities)
        :keypad-identity (pb:terminal-capabilities.keypad-identity capabilities)))))

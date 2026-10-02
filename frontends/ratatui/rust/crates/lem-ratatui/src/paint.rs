@@ -1,9 +1,9 @@
-//! Turning `lem.relay.v1` ops into cells.
+//! Turning `lem.display.v1` ops into cells.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lem_protocol::v1::{self, UnderlineStyle};
+use lem_protocols::display::v1::{self, UnderlineStyle};
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::Rect;
 use ratatui_core::style::{Color, Modifier, Style};

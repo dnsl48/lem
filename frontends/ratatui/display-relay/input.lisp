@@ -1,5 +1,5 @@
-(defpackage :lem-relay/input
-  (:use :cl :lem-relay/relay)
+(defpackage :lem-display-relay/input
+  (:use :cl :lem-display-relay/relay)
   (:export :input
            :input-time
            :input-seq
@@ -25,13 +25,13 @@
            :*click-interval*
            :count-click
            :deliver))
-(in-package :lem-relay/input)
+(in-package :lem-display-relay/input)
 
 (defparameter *click-interval* 0.5
   "Seconds within which another press of the same button on the same cell
 counts as a double, then triple, click. Set it in init.lisp:
 
-  (setf lem-relay/input:*click-interval* 0.4)
+  (setf lem-display-relay/input:*click-interval* 0.4)
 
 The display reports every press as it happens and the relay counts them
 (ADR 0013), since Lem acts on the count: two selects an expression,
@@ -67,7 +67,7 @@ keep their existing Lem names, and unmodified characters insert normally.")
 ;;; What the display sends (ADR 0011), as Lisp data a codec decodes into.
 
 (defstruct (input (:constructor nil))
-  "What every input has (ADR 0013). lem.relay.v1 carries both on every
+  "What every input has (ADR 0013). lem.display.v1 carries both on every
 message; either is NIL only for an input made in Lisp rather than
 decoded, as tests make them:
 

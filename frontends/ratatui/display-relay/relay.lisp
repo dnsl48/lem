@@ -1,6 +1,6 @@
-(defpackage :lem-relay/relay
-  (:use :cl :lem-relay/frame :lem-relay/view)
-  (:local-nicknames (:draw :lem-relay/draw)
+(defpackage :lem-display-relay/relay
+  (:use :cl :lem-display-relay/frame :lem-display-relay/view)
+  (:local-nicknames (:draw :lem-display-relay/draw)
                     (:queue :lem/common/queue))
   (:export :relay
            :relay-session
@@ -27,7 +27,7 @@
            :make-clipboard-request
            :clipboard-replied
            :relay-input-seq))
-(in-package :lem-relay/relay)
+(in-package :lem-display-relay/relay)
 
 (defparameter *clipboard-timeout* 0.1
   "Seconds `lem-if:clipboard-paste' waits for the display's clipboard, as
@@ -101,7 +101,7 @@ decides light or dark theme mode from it.")
     :initform nil
     :accessor relay-last-press
     :documentation "The last mouse press, for counting clicks: see
-`lem-relay/input:count-click'.")
+`lem-display-relay/input:count-click'.")
    (mouse-x :initform -1 :accessor relay-mouse-x)
    (mouse-y :initform -1 :accessor relay-mouse-y)
    (painted
@@ -115,7 +115,7 @@ painter's order, so this is the stacking order (ADR 0012).")
     :initform nil
     :accessor relay-input-seq
     :documentation "The `seq' of the last display message handed to Lem,
-recorded by `lem-relay/input:deliver'; each frame carries it.")
+recorded by `lem-display-relay/input:deliver'; each frame carries it.")
    (clipboard-replies :initform (queue:make-concurrent-queue)
                       :reader relay-clipboard-replies))
   (:documentation "The relay's half of a Lem implementation: every `lem-if'
@@ -280,7 +280,7 @@ there is no sink."
 ;;; Frames
 
 (defun current-cursor (relay)
-  "The primary cursor, where the drawing noted it (`lem-relay/draw')."
+  "The primary cursor, where the drawing noted it (`lem-display-relay/draw')."
   (let* ((window (lem:current-window))
          (view (lem:window-view window)))
     (when view

@@ -1,6 +1,6 @@
-(defpackage :lem-relay/tests/relay
-  (:use :cl :rove :lem-relay/frame :lem-relay/relay))
-(in-package :lem-relay/tests/relay)
+(defpackage :lem-display-relay/tests/relay
+  (:use :cl :rove :lem-display-relay/frame :lem-display-relay/relay))
+(in-package :lem-display-relay/tests/relay)
 
 (defclass test-relay (relay lem:implementation) ()
   (:default-initargs
@@ -126,10 +126,10 @@ editors have run in one process, as tests do, the two can be different
   ;; which rebuilds every attribute from its definition, keeps them.
   (with-editor (relay)
     (lem:load-theme "lem-default" nil)
-    (let ((put (first (lem-relay/draw:object-puts
+    (let ((put (first (lem-display-relay/draw:object-puts
                        (make-instance 'lem-core/display:text-object
                                       :string "x" :attribute 'test-italic-attribute :type nil)
-                       0 0 (lem-relay/view:make-view :id 1 :width 10 :height 1)))))
+                       0 0 (lem-display-relay/view:make-view :id 1 :width 10 :height 1)))))
       (ok (style-italic (text-put-style put)))
       (ok (eq :curly (style-underline-style (text-put-style put)))))))
 
@@ -148,7 +148,7 @@ editors have run in one process, as tests do, the two can be different
 
 (deftest a-frame-carries-the-last-input-delivered
   (with-editor (relay)
-    (lem-relay/input:deliver relay (lem-relay/input:make-resize-input 80 24 :seq 17))
+    (lem-display-relay/input:deliver relay (lem-display-relay/input:make-resize-input 80 24 :seq 17))
     (redraw)
     (ok (= 17 (frame-input-seq (last-frame))))))
 

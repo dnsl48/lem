@@ -1,4 +1,4 @@
-(defpackage :lem-relay/frame
+(defpackage :lem-display-relay/frame
   (:use :cl)
   (:export
    ;; Styles: a Lem attribute as the display will show it.
@@ -99,7 +99,7 @@
    :session-dropped-count
    :add-op
    :finish-frame))
-(in-package :lem-relay/frame)
+(in-package :lem-display-relay/frame)
 
 (defparameter *underline-styles* '(:curly :dotted :dashed :double)
   "The values of a Lem attribute's underline style the display draws

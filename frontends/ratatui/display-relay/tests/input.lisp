@@ -1,6 +1,6 @@
-(defpackage :lem-relay/tests/input
-  (:use :cl :rove :lem-relay/relay :lem-relay/input))
-(in-package :lem-relay/tests/input)
+(defpackage :lem-display-relay/tests/input
+  (:use :cl :rove :lem-display-relay/relay :lem-display-relay/input))
+(in-package :lem-display-relay/tests/input)
 
 (defclass input-relay (relay) ()
   (:documentation "A relay for input tests: nothing is drawn, so it needs
@@ -16,7 +16,7 @@ dequeues first, so ignoring the error still discards the event."
         :do (ignore-errors (lem:receive-event 0))))
 
 (defun press-clicks-of (relay)
-  (lem-relay/input::press-clicks (relay-last-press relay)))
+  (lem-display-relay/input::press-clicks (relay-last-press relay)))
 
 (defun next-event ()
   (lem:receive-event 0.5))
@@ -156,7 +156,7 @@ dequeues first, so ignoring the error still discards the event."
                          (make-mouse-input :move 1 1)
                          (make-mouse-input :wheel 1 1 :wheel-y -1)))
       (ok (= 1 (queued-after (lambda () (deliver relay input))))
-          (string-downcase (symbol-name (lem-relay/input::mouse-input-action input)))))))
+          (string-downcase (symbol-name (lem-display-relay/input::mouse-input-action input)))))))
 
 (deftest a-release-with-no-button-is-ignored
   (ok (zerop (queued-after (lambda ()

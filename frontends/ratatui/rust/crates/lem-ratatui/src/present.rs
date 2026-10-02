@@ -25,7 +25,7 @@ use crossterm::style::{
     SetUnderlineColor,
 };
 use crossterm::terminal::{Clear, ClearType};
-use lem_protocol::v1::{CursorShape, UnderlineStyle};
+use lem_protocols::display::v1::{CursorShape, UnderlineStyle};
 use ratatui_core::buffer::Cell;
 use ratatui_core::layout::Position;
 use ratatui_core::style::{Color, Modifier};

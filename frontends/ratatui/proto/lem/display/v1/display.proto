@@ -1,4 +1,5 @@
-// The protocol between lem-relay (the editor side) and a display.
+// The protocol between Lem and a display: lem-display-relay on the editor
+// side, a display process such as lem-ratatui on the other.
 //
 // Reviewed September 2026 (relay-plan.md, phase 2 step 2).
 //
@@ -8,6 +9,8 @@
 //   0013  icons, mouse, clicks; every message's identity and time
 //   0014  the display describes keys; the relay names them
 //   0015  font styles; 0016 underline styles
+//   0018  hyperlinks
+//   0019  named lem.display.v1, one package per link (was lem.relay.v1)
 //
 // Transport: the launcher's pipes, stdio (ADR 0005). Each message is one
 // ToDisplay or ToEditor, framed with protobuf's standard length-delimited
@@ -15,7 +18,7 @@
 // encode_length_delimited / decode_length_delimited).
 //
 // Evolution: never renumber or reuse a field; `reserved` what is removed.
-// An incompatible change is package lem.relay.v2, not an edit to v1.
+// An incompatible change is package lem.display.v2, not an edit to v1.
 //
 // Units: positions and sizes are character cells, 0-based; there are no
 // pixels anywhere. Colours are packed 0xRRGGBB in a uint32, and an absent
@@ -23,7 +26,7 @@
 
 syntax = "proto3";
 
-package lem.relay.v1;
+package lem.display.v1;
 
 // ---------------------------------------------------------------------------
 // Envelopes

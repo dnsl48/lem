@@ -1,10 +1,11 @@
 # lem-ratatui
 
 A terminal frontend for Lem built on `crossterm`. Lem's side is
-`lem-relay`, our own implementation of the `lem-if` protocol, and the two
-halves speak `lem.relay.v1`, a protobuf protocol defined in
-[`proto/`](proto/lem/relay/v1/relay.proto) (see
-[`docs/relay-plan.md`](docs/relay-plan.md)).
+`lem-display-relay`, our own implementation of the `lem-if` protocol, and
+the two halves speak `lem.display.v1`, a protobuf protocol defined in
+[`proto/`](proto/lem/display/v1/display.proto) (see
+[`docs/relay-plan.md`](docs/relay-plan.md) and
+[ADR 0019](docs/adr/0019-an-os-agent-and-a-link-per-peer.md)).
 
 > **Status: working PoC.** Opens files, edits them, renders syntax
 > colours, reflows on resize and leaves the terminal clean on exit — all
@@ -17,8 +18,9 @@ halves speak `lem.relay.v1`, a protobuf protocol defined in
 Two halves, split by toolchain rather than by role:
 
 ```
-relay/    lem-relay: every lem-if:* method, building frames from what
-          Lem draws, and the codec that puts them on the wire
+display-relay/
+          lem-display-relay: every lem-if:* method, building frames
+          from what Lem draws, and the codec that puts them on the wire
 lisp/     the ratatui implementation class and the process entry point
 rust/     the launcher, which starts both halves and connects them, and
           the display, which owns the terminal: paints protocol frames
@@ -40,7 +42,7 @@ so it must not be a TTY; the display's does too, so it draws on
                ▼                               ▼
 ┌──────────────────────────┐  frames  ┌─────────────────┐
 │ lem --interface RATATUI  │ ───────► │  lem-ratatui    │
-│ (lem-relay over stdio)   │ ◄─────── │  (owns the TTY) │
+│ (lem-display-relay)      │ ◄─────── │  (owns the TTY) │
 └──────────────────────────┘  input   └─────────────────┘
 ```
 
@@ -71,34 +73,35 @@ lisp/
   transport.lisp             stdin/stdout as the wire, everything else muffled
   links.lisp                 web addresses as hyperlinks (ADR 0018)
   main.lisp                  entry point, and lem-if:invoke
-relay/                       lem-relay (ADR 0009, 0012)
-  lem-relay.asd              lem-relay, lem-relay/protobuf, lem-relay/tests
+display-relay/               lem-display-relay (ADR 0009, 0012, 0019)
+  lem-display-relay.asd      lem-display-relay, its /protobuf and /tests
   frame.lisp                 the frame model; suppression of no-op frames
   view.lisp, draw.lisp       drawing objects to ops, ported from lem-server
   relay.lisp                 the lem-if methods
   input.lisp                 what the display sends, delivered to Lem
-  protobuf/                  lem.relay.v1: framing, codec, the event loop
+  protobuf/                  lem.display.v1: framing, codec, the event loop
   tests/                     Rove tests, run by `make test`
-proto/lem/relay/v1/
-  relay.proto                the protocol's one schema (ADR 0010-0014)
+proto/lem/display/v1/
+  display.proto              the display link's schema (ADR 0010-0014, 0019)
 proto/fixtures/              golden messages both halves decode, each with
                              a text twin: relay-session (Lisp → Rust) and
                              display-inputs (Rust → Lisp)
 scripts/
   acceptance.py              the acceptance checks, driven through a pty
   workload.py                the fixed workload's frames and bytes
-  capture-relay-v1.lisp      regenerates proto/fixtures/relay-session.v1.*
+  capture-display-v1.lisp    regenerates proto/fixtures/relay-session.v1.*
 rust/
   Cargo.toml                 workspace
   crates/
-    lem-protocol/            wire types + codec; no TTY, unit-testable
+    lem-protocols/           wire types + framing, one module per link;
+                             no TTY, unit-testable
     lem-ratatui/             the display: transport, compositing, input,
                              and its own terminal output (present.rs)
     lem-ratatui-launcher/    the OS-facing binary: starts and connects
                              both halves; embeds them for `make dist`
 docs/
-  relay-plan.md              the plan lem-relay is being built to
-  protocol.md                how lem.relay.v1 behaves: order, guarantees
+  relay-plan.md              the plan the relay was built to (history)
+  protocol.md                how lem.display.v1 behaves: order, guarantees
   protocol-notes.md          what lem-server sent, before lem-relay (history)
   adr/                       decisions and the arguments behind them
 ```
@@ -108,7 +111,7 @@ docs/
 ```bash
 make -C frontends/ratatui          # everything + the dist/lem-ratatui-dev script
 make -C frontends/ratatui run      # launch against LEM_HOME=/tmp/lem-scratch/
-make -C frontends/ratatui test     # Rust and lem-relay suites (Lisp needs Roswell)
+make -C frontends/ratatui test     # Rust and lem-display-relay suites (Lisp needs Roswell)
 make -C frontends/ratatui dist     # one self-contained binary: dist/lem-ratatui
 ```
 
@@ -350,7 +353,7 @@ Lem's names ([ADR 0014](docs/adr/0014-the-display-describes-keys.md)).
 
 The **mouse** is captured: click, drag, and the wheel reach Lem, and
 double and triple clicks select an expression and a form. The relay counts
-them, within `lem-relay/input:*click-interval*` (0.5 s, settable from
+them, within `lem-display-relay/input:*click-interval*` (0.5 s, settable from
 `init.lisp`). Capturing takes the terminal's own text selection away;
 most terminals keep it on **Shift+drag**. Pasting from the terminal
 (bracketed paste) inserts the text as the major mode pastes.
