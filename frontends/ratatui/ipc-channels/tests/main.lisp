@@ -175,3 +175,29 @@
            (when peer (close peer)))
       (sb-bsd-sockets:socket-close listener)
       (ignore-errors (delete-file path)))))
+
+(deftest starting-a-reader-on-an-already-closed-channel-does-nothing
+  (let ((channel (in-memory-channel))
+        (closed (bt2:make-semaphore)))
+    (ipc:close-channel channel)
+    (ok (null (ipc:start-reader channel #'identity
+                                :on-close (lambda () (bt2:signal-semaphore closed))))
+        "no thread started")
+    (ok (bt2:wait-on-semaphore closed :timeout 2) "on-close still runs")))
+
+(deftest a-closer-runs-exactly-once-whether-or-not-a-reader-was-started
+  (dolist (reader-p '(nil t))
+    (let* ((closer-calls 0)
+           (closed (bt2:make-semaphore))
+           (channel (ipc:make-channel (flexi-streams:make-in-memory-input-stream (octets))
+                                      (flexi-streams:make-in-memory-output-stream)
+                                      :closer (lambda () (incf closer-calls))
+                                      :shutdown (lambda ()))))
+      (if reader-p
+          (progn
+            (ipc:start-reader channel #'identity
+                              :on-close (lambda () (bt2:signal-semaphore closed)))
+            (ok (bt2:wait-on-semaphore closed :timeout 2) "the reader released it")
+            (ipc:close-channel channel))
+          (ipc:close-channel channel))
+      (ok (= 1 closer-calls) (format nil "reader started = ~A" reader-p)))))

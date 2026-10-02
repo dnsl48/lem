@@ -18,7 +18,8 @@
    (seq :initform 0 :accessor channel-seq)
    (shutdown :initarg :shutdown :initform nil :reader channel-shutdown)
    (closer :initarg :closer :initform nil :reader channel-closer)
-   (reader-started-p :initform nil :accessor channel-reader-started-p))
+   (reader-started-p :initform nil :accessor channel-reader-started-p)
+   (closed-p :initform nil :accessor channel-closed-p))
   (:documentation "One peer process over a pair of octet streams. Messages
 are framed length-delimited and numbered from 1 in wire order, whichever
 thread sends (ADR 0013). What a message is belongs to the link: a channel
@@ -26,7 +27,10 @@ moves octet vectors.
 
 Closing is split into waking (SHUTDOWN) and releasing (CLOSER) so that
 the descriptor is never closed while a reader thread might still be
-polling it: see `close-channel' and `start-reader'."))
+polling it. Whether `close-channel' or the reader started by
+`start-reader' is the one that releases it is decided once, atomically
+under the channel's lock, by CLOSED-P and READER-STARTED-P together:
+see those two functions."))
 
 (defun make-channel (input output &key closer shutdown)
   "A channel reading the octet stream INPUT and writing OUTPUT. CLOSER, a
@@ -54,26 +58,29 @@ so it may keep state that must follow wire order."
 (defun release-channel (channel)
   "Free what CHANNEL's streams were made from, via its CLOSER. A channel
 with none (stdio, which the process owns, or an in-memory one, as in
-tests) does nothing. Called by `close-channel' directly when CHANNEL
-never had a reader started on it, and otherwise by that reader itself
-once its loop ends; never both, and never while a reader might still be
-polling the descriptor."
+tests) does nothing. Called exactly once per channel, by whichever of
+`close-channel' or a reader thread started by `start-reader' the two
+functions agreed, atomically, would be the one to call it."
   (alexandria:when-let ((closer (channel-closer channel)))
     (ignore-errors (funcall closer))))
 
 (defun close-channel (channel)
-  "End CHANNEL: a reader blocked on it sees the end, and later sends fail.
-Wakes a reader via SHUTDOWN, if CHANNEL has one, which only marks the
-descriptor as done, not released. The descriptor itself is released
-right here only when CHANNEL never had a reader started on it
-(`start-reader'); otherwise that reader releases it itself once its own
-loop ends, so it is never closed while that thread might still be
-polling it."
-  (alexandria:when-let ((shutdown (channel-shutdown channel)))
-    (ignore-errors (funcall shutdown)))
-  (unless (bt2:with-lock-held ((channel-lock channel))
-            (channel-reader-started-p channel))
-    (release-channel channel)))
+  "End CHANNEL: a reader blocked on it sees the end, and later sends
+fail. Closing an already-closed channel, or racing a `start-reader'
+call on the same channel from another thread, is safe: the decision —
+mark CHANNEL closed, wake it with SHUTDOWN, and release it immediately
+unless a reader was already started on it — is made once, atomically
+under CHANNEL's lock. A second close does nothing further; when a
+reader was started first, that reader releases CHANNEL itself once its
+own loop ends, never this function, so the descriptor is never closed
+while that thread might still be polling it."
+  (bt2:with-lock-held ((channel-lock channel))
+    (unless (channel-closed-p channel)
+      (setf (channel-closed-p channel) t)
+      (alexandria:when-let ((shutdown (channel-shutdown channel)))
+        (ignore-errors (funcall shutdown)))
+      (unless (channel-reader-started-p channel)
+        (release-channel channel)))))
 
 (defun start-reader (channel handler &key (name "lem-ipc-channels reader") on-close)
   "Read CHANNEL on a new thread named NAME, calling HANDLER with each
@@ -81,27 +88,37 @@ message, until the peer hangs up or the stream fails; then release
 CHANNEL (see `close-channel') and call ON-CLOSE. An error in HANDLER is
 logged and reading goes on: one bad message does not end the link.
 
-Marks CHANNEL as having a reader before this thread is even started, so
-that a `close-channel' racing with this call always sees it and leaves
-the descriptor for this thread to release, rather than closing it out
-from under a read that may already be under way. Returns the thread."
-  (bt2:with-lock-held ((channel-lock channel))
-    (setf (channel-reader-started-p channel) t))
-  (bt2:make-thread
-   (lambda ()
-     (unwind-protect
-          (handler-case
-              (loop :for body := (channel-receive channel)
-                    :while body
-                    :do (handler-case (funcall handler body)
-                          (error (condition)
-                            (log:error "~A: failed to handle a message: ~A" name condition))))
-            (error (condition)
-              (log:info "~A: the stream failed: ~A" name condition)))
-       (release-channel channel)
-       (when on-close
-         (funcall on-close))))
-   :name name))
+Whether CHANNEL is already closed and, if not, marking it as having a
+reader are decided together, atomically under CHANNEL's lock, with
+`close-channel' marking it closed: whichever of the two runs first
+wins, so the two can never both think the other is responsible for
+releasing CHANNEL. If CHANNEL is already closed, no thread is spawned —
+ON-CLOSE is still called, synchronously, so a caller waiting on it is
+not left hanging — and this returns NIL rather than a thread."
+  (if (bt2:with-lock-held ((channel-lock channel))
+        (if (channel-closed-p channel)
+            t
+            (progn (setf (channel-reader-started-p channel) t)
+                   nil)))
+      (progn
+        (when on-close
+          (funcall on-close))
+        nil)
+      (bt2:make-thread
+       (lambda ()
+         (unwind-protect
+              (handler-case
+                  (loop :for body := (channel-receive channel)
+                        :while body
+                        :do (handler-case (funcall handler body)
+                              (error (condition)
+                                (log:error "~A: failed to handle a message: ~A" name condition))))
+                (error (condition)
+                  (log:info "~A: the stream failed: ~A" name condition)))
+           (release-channel channel)
+           (when on-close
+             (funcall on-close))))
+       :name name)))
 
 (defun now-microseconds ()
   "Microseconds on this process's monotonic clock (ADR 0013)."
