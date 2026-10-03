@@ -116,7 +116,7 @@ rust/
     lem-ratatui/             the display: transport, compositing, input,
                              and its own terminal output (present.rs)
     lem-ratatui-launcher/    the OS-facing binary: starts and connects
-                             both halves; embeds them for `make dist`
+                             all three processes; embeds them for `make dist`
 docs/
   relay-plan.md              the plan the relay was built to (history)
   protocol.md                how lem.display.v1 behaves: order, guarantees
@@ -145,14 +145,13 @@ and CMake files included. `make distclean` removes `toolchain/`, and
 [`docs/adr/0010`](docs/adr/0010-protobuf-for-schema-and-codec.md).
 
 `make dist` embeds the Lisp image, the display binary and the OS agent,
-zstd-compressed, in the launcher (`bundle` feature, ~27 MB against the
-image's ~125 MB).
+zstd-compressed, in the launcher (`bundle` feature).
 They can't be run from memory — an SBCL executable locates its core via
 `/proc/self/exe`, which a memfd can't satisfy — so the first launch
 unpacks them to `$XDG_CACHE_HOME/lem-ratatui/<hash>/` (default
 `~/.cache`) and later launches reuse them; copies from other builds are
-removed at that point. `LEM_RATATUI_LISP` and `LEM_RATATUI_TERMINAL`
-still override either one. See
+removed at that point. `LEM_RATATUI_LISP`, `LEM_RATATUI_TERMINAL` and
+`LEM_RATATUI_OS_AGENT` still override any of the three. See
 [`docs/adr/0007`](docs/adr/0007-one-binary-by-embedding-the-image.md) and
 [`0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 
@@ -196,7 +195,8 @@ seconds when the editor appears stuck. The relay's own warnings go to
 Lem's log, `<lem-home>/debug.log`. Lem's stderr goes to `lem.log` in the
 launcher's state directory (`$XDG_STATE_HOME/lem-ratatui/`, else
 `$HOME/.local/state/lem-ratatui/`); if Lem dies or exits non-zero the
-launcher says so, names that log, and exits non-zero.
+launcher says so, names that log, and exits non-zero. The OS agent's
+stderr goes to `os-agent.log` beside it, in the same directory.
 
 There is deliberately no `make ratatui` target in the root `Makefile`
 and no `lem.asd` registration yet.
@@ -244,10 +244,16 @@ Wide characters work — Lem's startup modeline contains U+1F512, and
 ## Clipboard
 
 `M-w` and `C-y` use the desktop's clipboard through the OS agent when it
-has one, and otherwise the display's, both through `arboard`. Lem waits
-only 0.1s for a paste to be answered, so the read happens inline rather
-than on a thread. Over SSH the agent finds no display server and says
-so, and the display's clipboard is used.
+has one, and otherwise the display's, both through `arboard`. Each side
+waits only 0.1s for a paste to be answered — the display's deadline is
+the relay's `*clipboard-timeout*`, the agent's is
+`lem-os-agent:*request-timeout*`, kept as two separate variables on
+purpose (ADR 0019's ruling R11: the agent must not depend on the relay,
+and will carry requests of its own later) — so the read happens inline
+rather than on a thread. Without X forwarding the display has no
+clipboard either, same as the agent: copy and paste then stay inside
+Lem's own kill ring rather than reaching the desktop (OSC 52, which
+would not need a display server, is a follow-up).
 
 `LEM_OS_AGENT_CLIPBOARD_FILE=PATH` makes a file the agent's clipboard,
 for trying it without a desktop; acceptance check 14 does.
@@ -474,7 +480,3 @@ flag. The flag has exactly one call site in Lem, and it is the crash.
 
 - `:underline-color-support` is off (see above) and needs real
   terminal-capability detection before it could be turned on.
-- No protocol version exchange at `login`. The launcher ships both halves
-  together, so they cannot drift today; phase 2's `Hello` carries one.
-- A clipboard reply answers the latest request: today's wire has no
-  request ids. Phase 2's protocol does.
