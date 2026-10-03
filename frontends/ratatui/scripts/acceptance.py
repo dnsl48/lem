@@ -12,7 +12,7 @@ appears contiguously, and only changed digits of the modeline are
 repainted. Three checks here first reported false failures for exactly
 that reason.
 """
-import os, re, signal, sys, tempfile
+import os, re, shutil, signal, sys, tempfile
 
 from harness import REPO, Session, edit
 
@@ -225,6 +225,7 @@ content = open(path).read() if os.path.exists(path) else "<no file>"
 copied = open(board).read()
 sessions = os.path.join(runtime, "lem-ratatui")
 left = os.listdir(sessions) if os.path.isdir(sessions) else []
+shutil.rmtree(runtime, ignore_errors=True)
 check(14, "the OS agent's clipboard is Lem's, and its socket is cleaned up",
       content.startswith("from-the-agent\ncopied") and copied == "copied" and left == [],
       f"file={content!r}, clipboard={copied!r}, left behind={left}")
