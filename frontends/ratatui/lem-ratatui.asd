@@ -6,10 +6,12 @@
                (:feature (:not :lem-minimal-build) "lem/extensions")
                "cl-ppcre"
                "lem-display-relay"
-               "lem-display-relay/protobuf")
+               "lem-display-relay/protobuf"
+               "lem-os-agent")
   :serial t
   :pathname "lisp/"
   :components ((:file "implementation")
+               (:file "clipboard")
                (:file "transport")
                (:file "links")
                (:file "main")))

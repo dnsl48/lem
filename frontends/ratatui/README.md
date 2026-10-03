@@ -15,17 +15,20 @@ the two halves speak `lem.display.v1`, a protobuf protocol defined in
 
 ## Shape
 
-Two halves, split by toolchain rather than by role:
+Three processes under a launcher, split by toolchain and by job:
 
 ```
-display-relay/
-          lem-display-relay: every lem-if:* method, building frames
-          from what Lem draws, and the codec that puts them on the wire
-lisp/     the ratatui implementation class and the process entry point
-rust/     the launcher, which starts both halves and connects them, and
-          the display, which owns the terminal: paints protocol frames
-          into a cell buffer, sends key and mouse events back
-docs/     the investigation, and the decisions it produced
+ipc-channels/  lem-ipc-channels: framing, numbering, replies and a
+               reader thread, for every link to Lem (ADR 0019)
+display-relay/ lem-display-relay: every lem-if:* method, building frames
+               from what Lem draws, and the codec that puts them on the wire
+os-agent/      lem-os-agent: Lem's side of the link to the OS agent, and
+               the API extensions use
+lisp/          the ratatui implementation class and the process entry point
+rust/          the launcher, which starts the others and connects them;
+               the display, which owns the terminal; and the OS agent,
+               which serves the desktop's clipboard
+docs/          the investigation, and the decisions it produced
 ```
 
 Lem and the display run as **siblings** under a launcher, which joins
@@ -45,6 +48,11 @@ so it must not be a TTY; the display's does too, so it draws on
 │ (lem-display-relay)      │ ◄─────── │  (owns the TTY) │
 └──────────────────────────┘  input   └─────────────────┘
 ```
+
+The launcher also starts `lem-os-agent`, the OS agent, when it finds
+one, with a socket in a directory private to the session; Lem connects
+to it there (`lem.os.v1`). It is optional: without it the clipboard is
+the display's. See [`docs/adr/0019`](docs/adr/0019-an-os-agent-and-a-link-per-peer.md).
 
 See [`docs/adr/0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 
@@ -70,9 +78,13 @@ dist/                        every build output (gitignored): the Lisp
 lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' class: relay + capability flags
+  clipboard.lisp             the agent's clipboard, else the display's
   transport.lisp             stdin/stdout as the wire, everything else muffled
   links.lisp                 web addresses as hyperlinks (ADR 0018)
   main.lisp                  entry point, and lem-if:invoke
+ipc-channels/                lem-ipc-channels (ADR 0019)
+  lem-ipc-channels.asd       lem-ipc-channels, its /tests
+  framing.lisp, replies.lisp, channel.lisp
 display-relay/               lem-display-relay (ADR 0009, 0012, 0019)
   lem-display-relay.asd      lem-display-relay, its /protobuf and /tests
   frame.lisp                 the frame model; suppression of no-op frames
@@ -81,8 +93,13 @@ display-relay/               lem-display-relay (ADR 0009, 0012, 0019)
   input.lisp                 what the display sends, delivered to Lem
   protobuf/                  lem.display.v1: framing, codec, the event loop
   tests/                     Rove tests, run by `make test`
+os-agent/                    lem-os-agent, Lem's side of the agent link
+  lem-os-agent.asd           lem-os-agent, its /tests
+  codec.lisp, main.lisp
 proto/lem/display/v1/
   display.proto              the display link's schema (ADR 0010-0014, 0019)
+proto/lem/os/v1/
+  os.proto                   the agent link's schema (ADR 0019)
 proto/fixtures/              golden messages both halves decode, each with
                              a text twin: relay-session (Lisp → Rust) and
                              display-inputs (Rust → Lisp)
@@ -95,6 +112,7 @@ rust/
   crates/
     lem-protocols/           wire types + framing, one module per link;
                              no TTY, unit-testable
+    lem-os-agent/            the OS agent: the desktop's clipboard over lem.os.v1
     lem-ratatui/             the display: transport, compositing, input,
                              and its own terminal output (present.rs)
     lem-ratatui-launcher/    the OS-facing binary: starts and connects
@@ -126,8 +144,9 @@ and CMake files included. `make distclean` removes `toolchain/`, and
 `make clean` leaves it. See
 [`docs/adr/0010`](docs/adr/0010-protobuf-for-schema-and-codec.md).
 
-`make dist` embeds the Lisp image and the display binary, zstd-compressed,
-in the launcher (`bundle` feature, ~27 MB against the image's ~125 MB).
+`make dist` embeds the Lisp image, the display binary and the OS agent,
+zstd-compressed, in the launcher (`bundle` feature, ~27 MB against the
+image's ~125 MB).
 They can't be run from memory — an SBCL executable locates its core via
 `/proc/self/exe`, which a memfd can't satisfy — so the first launch
 unpacks them to `$XDG_CACHE_HOME/lem-ratatui/<hash>/` (default
@@ -158,8 +177,10 @@ Point `LEM_HOME` at a scratch directory when driving it by hand — note
 the **trailing slash**, which `merge-pathnames` requires. Every
 argument is passed through to Lem, so `lem-ratatui README.md` opens the
 file just as `lem README.md` would. `LEM_RATATUI_LISP` picks the Lisp
-image and `LEM_RATATUI_TERMINAL` the display binary; `make dist`'s binary
-falls back to the ones embedded in it.
+image and `LEM_RATATUI_TERMINAL` the display binary, and
+`LEM_RATATUI_OS_AGENT` the OS agent (one that does not exist means none:
+the launcher says so and carries on); `make dist`'s binary falls back to
+the ones embedded in it.
 
 At startup the display asks the terminal for its default colours
 (OSC 10/11, through `terminal-colorsaurus`) and passes them on in
@@ -222,9 +243,14 @@ Wide characters work — Lem's startup modeline contains U+1F512, and
 
 ## Clipboard
 
-`M-w` and `C-y` use the system clipboard through `arboard`. Lem waits only
-0.1s for a paste to be answered, so the read happens inline rather than on
-a thread.
+`M-w` and `C-y` use the desktop's clipboard through the OS agent when it
+has one, and otherwise the display's, both through `arboard`. Lem waits
+only 0.1s for a paste to be answered, so the read happens inline rather
+than on a thread. Over SSH the agent finds no display server and says
+so, and the display's clipboard is used.
+
+`LEM_OS_AGENT_CLIPBOARD_FILE=PATH` makes a file the agent's clipboard,
+for trying it without a desktop; acceptance check 14 does.
 
 Two caveats, neither ours to fix:
 
@@ -288,7 +314,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 13 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 15 checks
 ```
 
 ## Next steps
