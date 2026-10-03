@@ -22,8 +22,9 @@ format: a varint byte length, then the message.
 
 - Lem sends `ToDisplay`; the display sends `ToEditor`.
 - Lem's stdout is the wire and nothing else; its stderr goes to the
-  launcher's log (`/tmp/lem-ratatui.log`). The display draws on `/dev/tty`,
-  since its stdout is the wire too.
+  launcher's log (`lem.log` in its state directory:
+  `$XDG_STATE_HOME/lem-ratatui/`, else `$HOME/.local/state/lem-ratatui/`).
+  The display draws on `/dev/tty`, since its stdout is the wire too.
 - A stream ending between messages is a hang-up. A stream ending inside
   one is an error: a truncated message cannot be told from a desync.
 

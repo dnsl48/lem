@@ -172,9 +172,10 @@ Set `LEM_RATATUI_DEBUG=1` to turn off frame suppression, so every
 frame and modeline Lem draws is sent (ADR 0012), and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
 seconds when the editor appears stuck. The relay's own warnings go to
-Lem's log, `<lem-home>/debug.log`. Lem's stderr goes to
-`/tmp/lem-ratatui.log`; if Lem dies or exits non-zero the launcher says
-so, names that log, and exits non-zero.
+Lem's log, `<lem-home>/debug.log`. Lem's stderr goes to `lem.log` in the
+launcher's state directory (`$XDG_STATE_HOME/lem-ratatui/`, else
+`$HOME/.local/state/lem-ratatui/`); if Lem dies or exits non-zero the
+launcher says so, names that log, and exits non-zero.
 
 There is deliberately no `make ratatui` target in the root `Makefile`
 and no `lem.asd` registration yet.

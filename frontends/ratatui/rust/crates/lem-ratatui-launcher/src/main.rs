@@ -29,12 +29,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-/// Where Lem's stderr goes. Inherited, a backtrace would land on the
-/// display and shred it.
-const LOG: &str = "/tmp/lem-ratatui.log";
-
-/// Where the OS agent's stderr goes.
-const AGENT_LOG: &str = "/tmp/lem-ratatui-os-agent.log";
+/// The log file names in the state directory (`session::state_dir`),
+/// reused across sessions. Lem's stderr is never inherited — a backtrace
+/// would land on the display and shred it — so it always goes to a file
+/// when one can be arranged, same as the agent's.
+const LEM_LOG_NAME: &str = "lem.log";
+const AGENT_LOG_NAME: &str = "os-agent.log";
 
 /// How long Lem gets to exit on its own once the display has gone. It
 /// normally exits first — its hanging up is what ends the display — so
@@ -109,6 +109,8 @@ struct Ended {
     lem: Option<ExitStatus>,
     /// What went wrong without ending the session, reported after it.
     warnings: Vec<String>,
+    /// Where Lem's own log went, when it went anywhere.
+    lem_log: Option<PathBuf>,
 }
 
 /// The OS agent while the session runs, and where its socket lives.
@@ -116,11 +118,50 @@ struct RunningAgent {
     agent: agent::Agent,
     dir: PathBuf,
     socket: PathBuf,
+    /// Where its log went, when it went anywhere — for the warnings
+    /// `stop_agent` reports, not for removal: the agent removes its own.
+    log: Option<PathBuf>,
+}
+
+/// The directory logs live in for this run, reused across sessions. Not
+/// having one is a warning, not a fatal error: both Lem and the agent
+/// then run with their stderr discarded rather than inherited, which
+/// would let a backtrace land on the display and shred it.
+fn resolve_log_dir(warnings: &mut Vec<String>) -> Option<PathBuf> {
+    let dir = session::state_dir(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"));
+    match dir {
+        Some(dir) => match session::ensure_state_dir(&dir) {
+            Ok(()) => Some(dir),
+            Err(error) => {
+                warnings.push(format!(
+                    "no log file: creating {}: {error}; the OS agent's stderr and Lem's are discarded",
+                    dir.display()
+                ));
+                None
+            }
+        },
+        None => {
+            warnings.push(
+                "no log file: neither XDG_STATE_HOME nor HOME is set; \
+                 the OS agent's stderr and Lem's are discarded"
+                    .to_string(),
+            );
+            None
+        }
+    }
 }
 
 /// Start the OS agent in a new directory private to this session. Any
-/// failure is a warning: Lem runs without an agent.
-fn start_agent(program: &Path, session: &str, warnings: &mut Vec<String>) -> Option<RunningAgent> {
+/// failure is a warning: Lem runs without an agent. If the launcher
+/// itself is killed outright, nothing here runs to clean up afterwards —
+/// the (by then empty) directory is left behind; accepted, since no
+/// process can run cleanup code after being killed like that.
+fn start_agent(
+    program: &Path,
+    session: &str,
+    log: Option<&Path>,
+    warnings: &mut Vec<String>,
+) -> Option<RunningAgent> {
     let dir = session::runtime_dir(
         std::env::var_os("XDG_RUNTIME_DIR"),
         &std::env::temp_dir(),
@@ -131,8 +172,13 @@ fn start_agent(program: &Path, session: &str, warnings: &mut Vec<String>) -> Opt
         return None;
     }
     let socket = dir.join("os-agent.sock");
-    match agent::Agent::start(program, &socket, Path::new(AGENT_LOG)) {
-        Ok(agent) => Some(RunningAgent { agent, dir, socket }),
+    match agent::Agent::start(program, &socket, log, session) {
+        Ok(agent) => Some(RunningAgent {
+            agent,
+            dir,
+            socket,
+            log: log.map(Path::to_path_buf),
+        }),
         Err(error) => {
             let _ = std::fs::remove_dir_all(&dir);
             warnings.push(format!("no OS agent: {error:#}"));
@@ -143,70 +189,80 @@ fn start_agent(program: &Path, session: &str, warnings: &mut Vec<String>) -> Opt
 
 /// Stop the agent and remove its directory, noting anything abnormal.
 fn stop_agent(running: RunningAgent, warnings: &mut Vec<String>) {
+    let see = match &running.log {
+        Some(log) => format!("; see {}", log.display()),
+        None => String::new(),
+    };
     match running.agent.stop(GRACE) {
         Ok(Some(status)) if !status.success() => {
-            warnings.push(format!(
-                "the OS agent exited with {status}; see {AGENT_LOG}"
-            ));
+            warnings.push(format!("the OS agent exited with {status}{see}"));
         }
         Ok(Some(_)) => {}
-        Ok(None) => warnings.push(format!(
-            "the OS agent did not exit and was killed; see {AGENT_LOG}"
-        )),
+        Ok(None) => warnings.push(format!("the OS agent did not exit and was killed{see}")),
         Err(error) => warnings.push(format!("stopping the OS agent: {error:#}")),
     }
     let _ = std::fs::remove_dir_all(&running.dir);
 }
 
-/// Run both halves until the display exits, passing `args` to Lem.
-fn run(programs: &Programs, args: &[OsString], log: &Path) -> Result<Ended> {
-    let session = session::new_id();
-    let mut warnings = Vec::new();
-    let agent = programs
-        .agent
-        .as_deref()
-        .and_then(|program| start_agent(program, &session, &mut warnings));
+/// The two pipes connecting Lem and the display: Lem is started with one
+/// end of each, the display with the other.
+struct Pipes {
+    lem_stdin: os_pipe::PipeReader,
+    lem_stdout: os_pipe::PipeWriter,
+    from_lem: os_pipe::PipeReader,
+    to_lem: os_pipe::PipeWriter,
+}
 
-    // One pipe each way. Lem is started with its ends and the display with
-    // the others; the expressions holding them are dropped as soon as each
-    // has started, so this process keeps no end open, and either half
-    // exiting is seen by the other as EOF.
-    let (from_lem, lem_stdout) = os_pipe::pipe().context("creating a pipe")?;
-    let (lem_stdin, to_lem) = os_pipe::pipe().context("creating a pipe")?;
-    let stderr = File::create(log).with_context(|| format!("creating {}", log.display()))?;
-
-    let mut lem = duct::cmd(&programs.lisp, args).env("LEM_SESSION_ID", &session);
-    if let Some(running) = &agent {
+/// Start Lem and the display, and wait for both to end. Called only
+/// after the agent (if any) has started; `run` always stops it — whether
+/// this succeeds or not — before deciding what to do with the result.
+fn run_both(
+    programs: &Programs,
+    args: &[OsString],
+    session: &str,
+    agent: Option<&RunningAgent>,
+    lem_log: Option<&Path>,
+    pipes: Pipes,
+) -> Result<(ExitStatus, Option<ExitStatus>)> {
+    let mut lem = duct::cmd(&programs.lisp, args).env("LEM_SESSION_ID", session);
+    if let Some(running) = agent {
         lem = lem.env("LEM_OS_AGENT_SOCKET", &running.socket);
     }
-    let lem = lem
-        .stdin_file(lem_stdin)
-        .stdout_file(lem_stdout)
-        .stderr_file(stderr)
-        .unchecked()
-        .start();
-    let lem = match lem {
-        Ok(lem) => lem,
-        Err(error) => {
-            if let Some(running) = agent {
-                stop_agent(running, &mut warnings);
-            }
-            return Err(error).with_context(|| format!("starting {}", programs.lisp.display()));
+    // `stdin_file`/`stdout_file` take the pipe ends by value, so the whole
+    // chain through `start` must be one expression, not bound partway:
+    // a bound `Expression` lives to the end of this function (Rust drops
+    // locals by scope, not by last use), and so would keep its end of the
+    // pipe open long after Lem itself has died, hiding that from the
+    // display as EOF.
+    let lem_start = match lem_log {
+        Some(path) => {
+            let stderr =
+                File::create(path).with_context(|| format!("creating {}", path.display()))?;
+            lem.stdin_file(pipes.lem_stdin)
+                .stdout_file(pipes.lem_stdout)
+                .stderr_file(stderr)
+                .unchecked()
+                .start()
         }
+        None => lem
+            .stdin_file(pipes.lem_stdin)
+            .stdout_file(pipes.lem_stdout)
+            .stderr_null()
+            .unchecked()
+            .start(),
     };
+    let lem = lem_start.with_context(|| format!("starting {}", programs.lisp.display()))?;
+
     let display = duct::cmd(&programs.terminal, None::<OsString>)
-        .env("LEM_SESSION_ID", &session)
-        .stdin_file(from_lem)
-        .stdout_file(to_lem)
+        .env("LEM_SESSION_ID", session)
+        .stdin_file(pipes.from_lem)
+        .stdout_file(pipes.to_lem)
         .unchecked()
         .start();
     let display = match display {
         Ok(display) => display,
         Err(error) => {
             let _ = lem.kill();
-            if let Some(running) = agent {
-                stop_agent(running, &mut warnings);
-            }
             return Err(error).with_context(|| format!("starting {}", programs.terminal.display()));
         }
     };
@@ -220,19 +276,62 @@ fn run(programs: &Programs, args: &[OsString], log: &Path) -> Result<Ended> {
             None
         }
     };
+    Ok((display, lem))
+}
+
+/// Run both halves until the display exits, passing `args` to Lem.
+fn run(programs: &Programs, args: &[OsString]) -> Result<Ended> {
+    let session = session::new_id();
+    let mut warnings = Vec::new();
+
+    let log_dir = resolve_log_dir(&mut warnings);
+    let lem_log = log_dir.as_deref().map(|dir| dir.join(LEM_LOG_NAME));
+    let agent_log = log_dir.as_deref().map(|dir| dir.join(AGENT_LOG_NAME));
+
+    // One pipe each way. Lem is started with its ends and the display with
+    // the others; the expressions holding them are dropped as soon as each
+    // has started, so this process keeps no end open, and either half
+    // exiting is seen by the other as EOF. Created before the agent starts,
+    // so a failure here has nothing to stop yet.
+    let (from_lem, lem_stdout) = os_pipe::pipe().context("creating a pipe")?;
+    let (lem_stdin, to_lem) = os_pipe::pipe().context("creating a pipe")?;
+    let pipes = Pipes {
+        lem_stdin,
+        lem_stdout,
+        from_lem,
+        to_lem,
+    };
+
+    let agent = programs
+        .agent
+        .as_deref()
+        .and_then(|program| start_agent(program, &session, agent_log.as_deref(), &mut warnings));
+
+    // Whatever run_both returns, the agent (if any) is stopped and its
+    // directory removed before this propagates it.
+    let outcome = run_both(
+        programs,
+        args,
+        &session,
+        agent.as_ref(),
+        lem_log.as_deref(),
+        pipes,
+    );
     if let Some(running) = agent {
         stop_agent(running, &mut warnings);
     }
+    let (display, lem) = outcome?;
     Ok(Ended {
         display,
         lem,
         warnings,
+        lem_log,
     })
 }
 
 /// Report anything abnormal, after both halves are gone — and so after the
 /// display has handed the terminal back — and choose the exit code.
-fn report(ended: &Ended, log: &Path) -> ExitCode {
+fn report(ended: &Ended) -> ExitCode {
     for warning in &ended.warnings {
         eprintln!("lem-ratatui: {warning}");
     }
@@ -242,7 +341,10 @@ fn report(ended: &Ended, log: &Path) -> ExitCode {
     }
     match ended.lem {
         Some(lem) if !lem.success() => {
-            eprintln!("lem-ratatui: Lem exited with {lem}; see {}", log.display());
+            match &ended.lem_log {
+                Some(log) => eprintln!("lem-ratatui: Lem exited with {lem}; see {}", log.display()),
+                None => eprintln!("lem-ratatui: Lem exited with {lem}"),
+            }
             code(lem)
         }
         // Killed because the display ended the session, which it did
@@ -265,7 +367,6 @@ fn main() -> Result<ExitCode> {
     let programs = Programs::locate()?;
     // The command line belongs to Lem: files to open, `--eval`, ...
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let log = PathBuf::from(LOG);
-    let ended = run(&programs, &args, &log)?;
-    Ok(report(&ended, &log))
+    let ended = run(&programs, &args)?;
+    Ok(report(&ended))
 }

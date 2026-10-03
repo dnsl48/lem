@@ -36,6 +36,36 @@ pub fn create_private(dir: &Path) -> io::Result<()> {
     builder.create(dir)
 }
 
+/// Where logs live, reused across sessions (unlike the directory above,
+/// which is private to one): `$XDG_STATE_HOME/lem-ratatui/` when it is
+/// set, otherwise `$HOME/.local/state/lem-ratatui/`. `None` when neither
+/// is set.
+pub fn state_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    match xdg_state_home.filter(|dir| !dir.is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir).join("lem-ratatui")),
+        None => home.map(|home| {
+            PathBuf::from(home)
+                .join(".local")
+                .join("state")
+                .join("lem-ratatui")
+        }),
+    }
+}
+
+/// Create `dir` and its parents, owner-only, unless it exists already:
+/// unlike `create_private`, an existing directory (and its mode) is left
+/// alone, since this one is kept and reused across sessions.
+pub fn ensure_state_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +108,38 @@ mod tests {
         let mode = fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
         assert!(create_private(&dir).is_err(), "never reused");
+    }
+
+    #[test]
+    fn the_state_dir_prefers_xdg() {
+        assert_eq!(
+            state_dir(Some("/home/u/.state".into()), Some("/home/u".into())),
+            Some(PathBuf::from("/home/u/.state/lem-ratatui"))
+        );
+    }
+
+    #[test]
+    fn without_xdg_the_state_dir_is_under_home() {
+        let expected = Some(PathBuf::from("/home/u/.local/state/lem-ratatui"));
+        assert_eq!(state_dir(None, Some("/home/u".into())), expected);
+        assert_eq!(state_dir(Some("".into()), Some("/home/u".into())), expected);
+    }
+
+    #[test]
+    fn without_xdg_or_home_there_is_no_state_dir() {
+        assert_eq!(state_dir(None, None), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_state_dir_is_owner_only_and_reused() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("lem-ratatui");
+        ensure_state_dir(&dir).unwrap();
+        let mode = fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        ensure_state_dir(&dir).unwrap(); // reused, not an error
     }
 }
