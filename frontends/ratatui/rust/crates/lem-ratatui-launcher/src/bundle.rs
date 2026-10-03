@@ -1,5 +1,5 @@
-//! The Lisp image and display binary embedded in this one (`bundle`
-//! feature).
+//! The Lisp image, display binary and OS agent embedded in this one
+//! (`bundle` feature).
 //!
 //! Neither can be run straight from memory: an SBCL executable finds its
 //! core by opening `/proc/self/exe`, which a memfd has no usable path for
@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 
 static LISP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-ratatui-lisp.zst"));
 static TERMINAL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-ratatui.zst"));
+static OS_AGENT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lem-os-agent.zst"));
 const HASH: &str = env!("LEM_RATATUI_BUNDLE_HASH");
 
 /// Path of the unpacked Lisp image.
@@ -25,6 +26,11 @@ pub fn lisp() -> Result<PathBuf> {
 /// Path of the unpacked display binary.
 pub fn terminal() -> Result<PathBuf> {
     install(&format!("lem-ratatui{EXE_SUFFIX}"), TERMINAL)
+}
+
+/// Path of the unpacked OS agent.
+pub fn os_agent() -> Result<PathBuf> {
+    install(&format!("lem-os-agent{EXE_SUFFIX}"), OS_AGENT)
 }
 
 /// Path of `name` in the cache, unpacking `packed` there first if this

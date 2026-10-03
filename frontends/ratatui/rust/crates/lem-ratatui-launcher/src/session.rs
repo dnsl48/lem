@@ -14,9 +14,7 @@ pub fn new_id() -> String {
 /// The directory for this session's sockets: under `XDG_RUNTIME_DIR` when
 /// it is set (private to the user, by the XDG spec), otherwise in the
 /// system's temporary directory.
-#[allow(dead_code)]
 pub fn runtime_dir(xdg_runtime_dir: Option<OsString>, temp_dir: &Path, id: &str) -> PathBuf {
-    // Used from Task 6 on.
     match xdg_runtime_dir.filter(|dir| !dir.is_empty()) {
         Some(dir) => PathBuf::from(dir).join("lem-ratatui").join(id),
         None => temp_dir.join(format!("lem-ratatui-{id}")),
@@ -25,9 +23,7 @@ pub fn runtime_dir(xdg_runtime_dir: Option<OsString>, temp_dir: &Path, id: &str)
 
 /// Create `dir`, readable by its owner only, and its parent if missing.
 /// Fails if `dir` exists: a session never shares one.
-#[allow(dead_code)]
 pub fn create_private(dir: &Path) -> io::Result<()> {
-    // Used from Task 6 on.
     if let Some(parent) = dir.parent() {
         fs::create_dir_all(parent)?;
     }
