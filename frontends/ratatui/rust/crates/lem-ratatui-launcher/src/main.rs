@@ -134,7 +134,7 @@ fn resolve_log_dir(warnings: &mut Vec<String>) -> Option<PathBuf> {
             Ok(()) => Some(dir),
             Err(error) => {
                 warnings.push(format!(
-                    "no log file: creating {}: {error}; the OS agent's stderr and Lem's are discarded",
+                    "no log file: {}: {error}; the OS agent's stderr and Lem's are discarded",
                     dir.display()
                 ));
                 None

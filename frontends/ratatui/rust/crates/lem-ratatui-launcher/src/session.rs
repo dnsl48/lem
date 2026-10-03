@@ -54,7 +54,14 @@ pub fn state_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Op
 
 /// Create `dir` and its parents, owner-only, unless it exists already:
 /// unlike `create_private`, an existing directory (and its mode) is left
-/// alone, since this one is kept and reused across sessions.
+/// alone, since this one is kept and reused across sessions. Reusing one
+/// is refused, though, unless it is actually a directory (not a symlink
+/// standing in for one, which `DirBuilder::create` would follow) with no
+/// group or other permissions: `recursive` creation leaves an existing
+/// directory's mode as it finds it, so a shared `$XDG_STATE_HOME` could
+/// otherwise steer where a log file lands. Not checked: who owns it — a
+/// directory owned by someone else already fails the `File::create`
+/// that follows, which is reported the same way as this refusal is.
 pub fn ensure_state_dir(dir: &Path) -> io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
@@ -63,7 +70,27 @@ pub fn ensure_state_dir(dir: &Path) -> io::Result<()> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    builder.create(dir)
+    builder.create(dir)?;
+
+    let metadata = fs::symlink_metadata(dir)?;
+    if !metadata.is_dir() {
+        return Err(io::Error::other(
+            "not a directory (a symlink standing in for one?)",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = metadata.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(io::Error::other(format!(
+                "accessible to its group or others (mode {:03o})",
+                mode & 0o777
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -141,5 +168,43 @@ mod tests {
         let mode = fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
         ensure_state_dir(&dir).unwrap(); // reused, not an error
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pre_existing_directory_open_to_others_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("lem-ratatui");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(ensure_state_dir(&dir).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_standing_in_for_the_directory_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
+        let link = root.path().join("lem-ratatui");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(ensure_state_dir(&link).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pre_existing_owner_only_directory_is_accepted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("lem-ratatui");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(ensure_state_dir(&dir).is_ok());
     }
 }
