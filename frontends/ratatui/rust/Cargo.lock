@@ -451,6 +451,8 @@ dependencies = [
  "anyhow",
  "duct",
  "os_pipe",
+ "tempfile",
+ "uuid",
  "zstd",
 ]
 

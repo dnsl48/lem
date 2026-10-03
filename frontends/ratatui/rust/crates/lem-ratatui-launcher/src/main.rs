@@ -17,6 +17,8 @@
 #[cfg(feature = "bundle")]
 mod bundle;
 
+mod session;
+
 use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -93,7 +95,10 @@ fn run(programs: &Programs, args: &[OsString], log: &Path) -> Result<Ended> {
     let (lem_stdin, to_lem) = os_pipe::pipe().context("creating a pipe")?;
     let stderr = File::create(log).with_context(|| format!("creating {}", log.display()))?;
 
+    let session = session::new_id();
+
     let lem = duct::cmd(&programs.lisp, args)
+        .env("LEM_SESSION_ID", &session)
         .stdin_file(lem_stdin)
         .stdout_file(lem_stdout)
         .stderr_file(stderr)
@@ -101,6 +106,7 @@ fn run(programs: &Programs, args: &[OsString], log: &Path) -> Result<Ended> {
         .start()
         .with_context(|| format!("starting {}", programs.lisp.display()))?;
     let display = duct::cmd(&programs.terminal, None::<OsString>)
+        .env("LEM_SESSION_ID", &session)
         .stdin_file(from_lem)
         .stdout_file(to_lem)
         .unchecked()

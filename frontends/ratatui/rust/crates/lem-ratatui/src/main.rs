@@ -51,6 +51,14 @@ fn report(frames: usize, metrics: &metrics::Frames) {
     eprintln!("lem-ratatui: {}", metrics.report());
 }
 
+/// This session's id: the launcher's, from `LEM_SESSION_ID` (ADR 0019),
+/// or a new UUIDv7 when the display runs without one, as by hand.
+fn session_id(from_launcher: Option<String>) -> String {
+    from_launcher
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string())
+}
+
 fn main() -> Result<()> {
     let started = Instant::now();
 
@@ -105,10 +113,10 @@ fn main() -> Result<()> {
 
     // The display speaks first. The relay answers Welcome and then its
     // first frame, unasked (ADR 0011).
-    let session = uuid::Uuid::now_v7();
+    let session = session_id(std::env::var("LEM_SESSION_ID").ok());
     writer.send(to_editor::Message::Hello(v1::Hello {
         protocol_version: v1::PROTOCOL_VERSION,
-        session_id: session.to_string(),
+        session_id: session,
         width: u32::from(width),
         height: u32::from(height),
         foreground: colors.foreground,
@@ -203,6 +211,27 @@ fn main() -> Result<()> {
                 }
                 Some(to_display::Message::Welcome(_)) | None => {}
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_launchers_session_id_is_used() {
+        assert_eq!(
+            session_id(Some("from-the-launcher".into())),
+            "from-the-launcher"
+        );
+    }
+
+    #[test]
+    fn without_one_the_display_makes_a_uuid_v7() {
+        for missing in [None, Some(String::new())] {
+            let id = session_id(missing);
+            assert_eq!(uuid::Uuid::parse_str(&id).unwrap().get_version_num(), 7);
         }
     }
 }
