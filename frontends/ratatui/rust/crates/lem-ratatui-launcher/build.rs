@@ -1,6 +1,7 @@
-//! With the `bundle` feature, compress the saved Lisp image and the display
-//! binary into OUT_DIR for `src/bundle.rs` to embed, and export a hash of
-//! both as the cache key. Without the feature this does nothing.
+//! With the `bundle` feature, compress the saved Lisp image, the display
+//! binary and the OS agent into OUT_DIR for `src/bundle.rs` to embed, and
+//! export a hash of all three as the cache key. Without the feature this
+//! does nothing.
 
 fn main() {
     #[cfg(feature = "bundle")]

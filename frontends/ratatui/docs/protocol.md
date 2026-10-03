@@ -37,10 +37,10 @@ format: a varint byte length, then the message.
 
 Both envelopes carry, before their message:
 
-- `seq`: the sender's count, from 1 per session, in wire order. The relay
-  numbers messages under its output lock, so frames from the editor
-  thread and answers from the reader thread still number in the order
-  they are written.
+- `seq`: the sender's count, from 1 per session, in wire order. The
+  channel (`lem-ipc-channels`) numbers messages under its own lock, so
+  frames from the editor thread and answers from the reader thread still
+  number in the order they are written.
 - `time_us`: when the sender produced it, in microseconds on its own
   monotonic clock since it started. Only compared with the same sender's
   times. The relay's clock is SBCL's `CLOCK_MONOTONIC_COARSE`, a few
