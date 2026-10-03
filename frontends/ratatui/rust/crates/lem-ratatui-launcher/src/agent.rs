@@ -8,10 +8,13 @@
 //! group — as happens when the launcher, a session leader, is killed —
 //! is not also delivered to the agent. Without that, `SIGHUP`'s default,
 //! immediate disposition could beat the agent's own EOF-triggered
-//! cleanup to removing its socket. A `SIGKILL` of the launcher itself is
-//! not survivable by any of this process's code either way: nothing runs
-//! to remove the (by then empty) session directory in that one case, and
-//! that is accepted.
+//! cleanup to removing its socket (and, if that leaves it empty, the
+//! session directory the launcher made for it). A `SIGKILL` of the
+//! launcher itself is not survivable by any of *this* process's code —
+//! nothing here runs to clean up afterwards — but the agent's own
+//! lifeline fires just the same, the kernel closing its end of the pipe
+//! regardless of why the launcher is gone, so its cleanup still removes
+//! the socket and that directory.
 
 use std::ffi::OsString;
 use std::path::Path;

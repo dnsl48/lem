@@ -3,8 +3,9 @@
 //!
 //! The launcher starts it with `--socket PATH` and a pipe on its stdin
 //! that only the launcher holds. When that pipe closes — the session is
-//! over, or the launcher died — the agent removes its socket and exits.
-//! It serves one Lem at a time: an agent belongs to one session.
+//! over, or the launcher died — the agent removes its socket, and its
+//! directory if that leaves it empty, and exits. It serves one Lem at a
+//! time: an agent belongs to one session.
 
 mod clipboard;
 mod serve;
@@ -71,14 +72,33 @@ fn accept(
     Ok(())
 }
 
-/// Remove `socket` and pass `result` through, whichever it is. Called only
-/// once the agent owns `socket` (bind succeeded), so this is the one path
-/// out of `run` that returns instead of calling `process::exit` — it must
-/// not leave the socket behind either.
+/// Remove `socket` (and its directory, the session's, if that leaves it
+/// empty) and pass `result` through, whichever it is. Called only once
+/// the agent owns `socket` (bind succeeded), so this is the one path out
+/// of `run` that returns instead of calling `process::exit` — it must
+/// not leave the socket, or its directory, behind either.
 #[cfg(unix)]
 fn cleanup<T>(socket: &std::path::Path, result: anyhow::Result<T>) -> anyhow::Result<T> {
-    let _ = std::fs::remove_file(socket);
+    remove_socket_and_dir(socket);
     result
+}
+
+/// Remove `socket`, then — non-recursively, and any error from either
+/// ignored — its parent directory: the launcher creates one private to
+/// the session for the socket to live in (`start_agent`), and its own
+/// cleanup only runs it if `stop_agent` gets to run, which it does not
+/// when the launcher is killed outright (`SIGKILL`, or a terminal
+/// hangup/`SIGTERM` it has no handler for). The agent's own lifeline —
+/// stdin closing — fires the same way regardless of why the launcher is
+/// gone, so removing the directory here covers that case too; a failed
+/// `remove_dir` (not empty, or not this agent's to remove) is silently
+/// left for whoever does own it.
+#[cfg(unix)]
+fn remove_socket_and_dir(socket: &std::path::Path) {
+    let _ = std::fs::remove_file(socket);
+    if let Some(dir) = socket.parent() {
+        let _ = std::fs::remove_dir(dir);
+    }
 }
 
 #[cfg(not(unix))]
@@ -87,13 +107,13 @@ fn run(_socket: &std::path::Path) -> anyhow::Result<()> {
 }
 
 /// Exit when stdin closes: hand the clipboard back first, then remove
-/// the socket.
+/// the socket and its directory.
 #[cfg(unix)]
 fn watch_lifeline(socket: PathBuf, clipboard: Arc<Mutex<Option<Box<dyn Clipboard>>>>) {
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
         hand_back_clipboard(&clipboard);
-        let _ = std::fs::remove_file(&socket);
+        remove_socket_and_dir(&socket);
         std::process::exit(0);
     });
 }
@@ -123,6 +143,31 @@ mod tests {
             assert_eq!(outcome.is_ok(), ok);
             assert!(!socket.exists(), "socket removed");
         }
+    }
+
+    #[test]
+    fn remove_socket_and_dir_removes_the_now_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("os-agent.sock");
+        std::fs::write(&socket, "").unwrap();
+
+        remove_socket_and_dir(&socket);
+
+        assert!(!socket.exists(), "socket removed");
+        assert!(!dir.path().exists(), "now-empty directory removed too");
+    }
+
+    #[test]
+    fn remove_socket_and_dir_leaves_a_directory_that_is_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("os-agent.sock");
+        std::fs::write(&socket, "").unwrap();
+        std::fs::write(dir.path().join("something-else"), "").unwrap();
+
+        remove_socket_and_dir(&socket);
+
+        assert!(!socket.exists(), "socket removed");
+        assert!(dir.path().exists(), "left: not its to remove alone");
     }
 
     /// A clipboard that records whether its `Drop` ran, standing in for
