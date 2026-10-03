@@ -151,6 +151,24 @@ fn resolve_log_dir(warnings: &mut Vec<String>) -> Option<PathBuf> {
     }
 }
 
+/// Create `path` for a process's stderr, or warn and return `None` so the
+/// caller discards it instead — never fatal, same as `resolve_log_dir`'s
+/// own no-directory case: a log file that cannot be created (e.g. left
+/// root-owned by one `sudo -E` run) must not stop the process it is for.
+/// `who` names that process in the warning, e.g. "Lem" or "the OS agent".
+fn open_log_or_warn(path: &Path, who: &str, warnings: &mut Vec<String>) -> Option<File> {
+    match File::create(path) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            warnings.push(format!(
+                "no log file for {who}: {}: {error}; its stderr is discarded",
+                path.display()
+            ));
+            None
+        }
+    }
+}
+
 /// Start the OS agent in a new directory private to this session. Any
 /// failure is a warning: Lem runs without an agent. If the launcher
 /// itself is killed outright, nothing here runs to clean up afterwards —
@@ -172,7 +190,7 @@ fn start_agent(
         return None;
     }
     let socket = dir.join("os-agent.sock");
-    match agent::Agent::start(program, &socket, log, session) {
+    match agent::Agent::start(program, &socket, log, session, warnings) {
         Ok(agent) => Some(RunningAgent {
             agent,
             dir,
@@ -223,6 +241,7 @@ fn run_both(
     agent: Option<&RunningAgent>,
     lem_log: Option<&Path>,
     pipes: Pipes,
+    warnings: &mut Vec<String>,
 ) -> Result<(ExitStatus, Option<ExitStatus>)> {
     let mut lem = duct::cmd(&programs.lisp, args).env("LEM_SESSION_ID", session);
     if let Some(running) = agent {
@@ -234,16 +253,13 @@ fn run_both(
     // locals by scope, not by last use), and so would keep its end of the
     // pipe open long after Lem itself has died, hiding that from the
     // display as EOF.
-    let lem_start = match lem_log {
-        Some(path) => {
-            let stderr =
-                File::create(path).with_context(|| format!("creating {}", path.display()))?;
-            lem.stdin_file(pipes.lem_stdin)
-                .stdout_file(pipes.lem_stdout)
-                .stderr_file(stderr)
-                .unchecked()
-                .start()
-        }
+    let lem_start = match lem_log.and_then(|path| open_log_or_warn(path, "Lem", warnings)) {
+        Some(stderr) => lem
+            .stdin_file(pipes.lem_stdin)
+            .stdout_file(pipes.lem_stdout)
+            .stderr_file(stderr)
+            .unchecked()
+            .start(),
         None => lem
             .stdin_file(pipes.lem_stdin)
             .stdout_file(pipes.lem_stdout)
@@ -316,6 +332,7 @@ fn run(programs: &Programs, args: &[OsString]) -> Result<Ended> {
         agent.as_ref(),
         lem_log.as_deref(),
         pipes,
+        &mut warnings,
     );
     if let Some(running) = agent {
         stop_agent(running, &mut warnings);
@@ -369,4 +386,37 @@ fn main() -> Result<ExitCode> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let ended = run(&programs, &args)?;
     Ok(report(&ended))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_log_or_warn_creates_the_file_when_it_can() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let mut warnings = Vec::new();
+        assert!(open_log_or_warn(&log, "Lem", &mut warnings).is_some());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(log.exists());
+    }
+
+    #[test]
+    fn open_log_or_warn_falls_back_when_it_cannot_create_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // Its parent is a regular file, so the log can never be created
+        // (ENOTDIR) — root-proof, unlike a 0500 directory.
+        let not_a_dir = dir.path().join("not-a-dir");
+        std::fs::write(&not_a_dir, "").unwrap();
+        let log = not_a_dir.join("log");
+        let mut warnings = Vec::new();
+        assert!(open_log_or_warn(&log, "Lem", &mut warnings).is_none());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("Lem"), "{warnings:?}");
+        assert!(
+            warnings[0].contains(&log.display().to_string()),
+            "{warnings:?}"
+        );
+    }
 }
