@@ -36,21 +36,25 @@ impl Agent {
         let args = [OsString::from("--socket"), socket.as_os_str().to_owned()];
         let cmd = duct::cmd(program, args)
             .env("LEM_SESSION_ID", session)
-            .stdin_file(stdin)
-            .stdout_null()
             .before_spawn(detach_from_terminal)
             .unchecked();
-        let cmd = match log {
+        // `stdin_file` takes `stdin` by value, so (as in `run_both`) the
+        // whole chain through `start` must be one expression per branch,
+        // not bound partway: a bound `Expression` lives to the end of
+        // this function regardless of being shadowed, keeping its copy
+        // of the pipe open longer than intended.
+        let start = match log {
             Some(log) => {
                 let stderr =
                     File::create(log).with_context(|| format!("creating {}", log.display()))?;
-                cmd.stderr_file(stderr)
+                cmd.stdin_file(stdin)
+                    .stdout_null()
+                    .stderr_file(stderr)
+                    .start()
             }
-            None => cmd.stderr_null(),
+            None => cmd.stdin_file(stdin).stdout_null().stderr_null().start(),
         };
-        let handle = cmd
-            .start()
-            .with_context(|| format!("starting {}", program.display()))?;
+        let handle = start.with_context(|| format!("starting {}", program.display()))?;
         Ok(Self {
             handle,
             lifeline: Some(lifeline),
