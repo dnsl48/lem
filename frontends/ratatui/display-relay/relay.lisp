@@ -1,7 +1,7 @@
 (defpackage :lem-display-relay/relay
   (:use :cl :lem-display-relay/frame :lem-display-relay/view)
   (:local-nicknames (:draw :lem-display-relay/draw)
-                    (:queue :lem/common/queue))
+                    (:ipc :lem-ipc-channels))
   (:export :relay
            :relay-session
            :relay-sink
@@ -116,7 +116,7 @@ painter's order, so this is the stacking order (ADR 0012).")
     :accessor relay-input-seq
     :documentation "The `seq' of the last display message handed to Lem,
 recorded by `lem-display-relay/input:deliver'; each frame carries it.")
-   (clipboard-replies :initform (queue:make-concurrent-queue)
+   (clipboard-replies :initform (ipc:make-replies)
                       :reader relay-clipboard-replies))
   (:documentation "The relay's half of a Lem implementation: every `lem-if'
 drawing method, building frames with a `session'.
@@ -311,18 +311,9 @@ there is no sink."
 
 (defun await-clipboard (relay id)
   "The text replied to the request sent as ID, or NIL after
-`*clipboard-timeout*'.
-A late reply to an earlier request is discarded, not mistaken for this
-one's."
-  (loop :with deadline := (+ (get-internal-real-time)
-                             (* *clipboard-timeout* internal-time-units-per-second))
-        :for remaining := (/ (- deadline (get-internal-real-time))
-                             internal-time-units-per-second)
-        :while (plusp remaining)
-        :do (let ((reply (queue:dequeue (relay-clipboard-replies relay)
-                                        :timeout remaining :timeout-value nil)))
-              (when (and reply (eql id (car reply)))
-                (return (cdr reply))))))
+`*clipboard-timeout*'. A late reply to an earlier request is discarded,
+not mistaken for this one's."
+  (values (ipc:await-reply (relay-clipboard-replies relay) id *clipboard-timeout*)))
 
 (defun clipboard-replied (relay reply-to text)
   "Hand the display's clipboard TEXT, answering the request sent as
@@ -331,4 +322,4 @@ REPLY-TO, to the `lem-if:clipboard-paste' waiting for it.
 Called from the thread reading the display, never the editor's: the
 editor thread is blocked in `lem-if:clipboard-paste' waiting for exactly
 this, so the reply cannot go through `lem:send-event' (ADR 0012)."
-  (queue:enqueue (relay-clipboard-replies relay) (cons reply-to text)))
+  (ipc:deliver-reply (relay-clipboard-replies relay) reply-to text))

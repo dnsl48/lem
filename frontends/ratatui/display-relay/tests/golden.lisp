@@ -1,6 +1,6 @@
 (defpackage :lem-display-relay/tests/golden
   (:use :cl :rove :lem-display-relay/input)
-  (:local-nicknames (:framing :lem-display-relay/protobuf/framing)
+  (:local-nicknames (:framing :lem-ipc-channels)
                     (:codec :lem-display-relay/protobuf/codec)
                     (:relay :lem-display-relay/relay)))
 (in-package :lem-display-relay/tests/golden)

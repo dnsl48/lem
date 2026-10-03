@@ -2,7 +2,7 @@
   (:use :cl :rove :lem-display-relay/frame :lem-display-relay/input)
   (:local-nicknames (:pb :cl-protobufs.lem.display.v1)
                     (:proto :cl-protobufs)
-                    (:framing :lem-display-relay/protobuf/framing)
+                    (:framing :lem-ipc-channels)
                     (:codec :lem-display-relay/protobuf/codec)
                     (:serve :lem-display-relay/protobuf/serve)
                     (:relay :lem-display-relay/relay)))
@@ -24,23 +24,6 @@
 
 (defun octets (&rest bytes)
   (coerce bytes '(vector (unsigned-byte 8))))
-
-(deftest lengths-are-varints
-  (ok (equalp (octets 3 1 2 3) (delimited (octets 1 2 3))) "one byte up to 127")
-  (let ((body (make-array 300 :element-type '(unsigned-byte 8) :initial-element 7)))
-    (ok (equalp (octets #xAC #x02) (subseq (delimited body) 0 2)) "300 is AC 02")
-    (ok (equalp (list body) (undelimited (delimited body))))))
-
-(deftest messages-round-trip-back-to-back
-  (let ((a (octets 1)) (b (octets)) (c (octets 9 9)))
-    (ok (equalp (list a b c) (undelimited (delimited a b c))) "the empty one included")))
-
-(deftest the-end-between-messages-is-not-an-error
-  (ok (null (framing:read-delimited (flexi-streams:make-in-memory-input-stream (octets))))))
-
-(deftest the-end-inside-a-prefix-or-message-is
-  (ok (signals (framing:read-delimited (flexi-streams:make-in-memory-input-stream (octets #x80)))))
-  (ok (signals (framing:read-delimited (flexi-streams:make-in-memory-input-stream (octets 5 1))))))
 
 ;;; Encoding
 
