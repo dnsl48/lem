@@ -12,7 +12,7 @@ appears contiguously, and only changed digits of the modeline are
 repainted. Three checks here first reported false failures for exactly
 that reason.
 """
-import os, re, signal, sys
+import os, re, signal, sys, tempfile
 
 from harness import REPO, Session, edit
 
@@ -200,6 +200,45 @@ def links_drawn(forced):
 check(13, "web addresses reach the terminal as hyperlinks, and only when supported",
       "https://example.com/plain" in on and "https://example.com/md" in on and not off,
       f"linked: {sorted(set(on))}; sent when off: {off}")
+
+# --- 14: the OS agent's clipboard (ADR 0019) ---------------------------
+# A file stands in for the desktop's clipboard (LEM_OS_AGENT_CLIPBOARD_FILE),
+# so this runs with no display server. Yanking inserts what the agent says
+# is on the clipboard; copying puts text there. XDG_RUNTIME_DIR points at a
+# scratch directory so that the session's socket directory can be seen to
+# go away.
+runtime = tempfile.mkdtemp(prefix="lem-accept-runtime-")
+board = os.path.join(runtime, "clipboard.txt")
+with open(board, "w") as f:
+    f.write("from-the-agent")
+path = "/tmp/lem-accept-agent.txt"
+if os.path.exists(path): os.remove(path)
+s = Session(env={"LEM_OS_AGENT_CLIPBOARD_FILE": board, "XDG_RUNTIME_DIR": runtime}); s.pump(8)
+s.send([b"\x18", b"\x06"]); s.pump(1.5)                              # C-x C-f
+s.send(path); s.send([b"\r"]); s.pump(2)
+s.send([b"\x19"]); s.pump(1)                                         # C-y
+s.send([b"\r"]); s.send("copied", delay=0.15); s.pump(0.6)
+s.send([b"\x01", b"\x00", b"\x05", b"\x1bw"], delay=0.25); s.pump(1)  # C-a C-SPC C-e M-w
+s.send([b"\x18", b"\x13"]); s.pump(2)                                # C-x C-s
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()                      # C-x C-c
+content = open(path).read() if os.path.exists(path) else "<no file>"
+copied = open(board).read()
+sessions = os.path.join(runtime, "lem-ratatui")
+left = os.listdir(sessions) if os.path.isdir(sessions) else []
+check(14, "the OS agent's clipboard is Lem's, and its socket is cleaned up",
+      content.startswith("from-the-agent\ncopied") and copied == "copied" and left == [],
+      f"file={content!r}, clipboard={copied!r}, left behind={left}")
+
+# --- 15: no OS agent ----------------------------------------------------
+# The agent is optional: when it cannot start, the editor runs as before
+# and the launcher says why once the terminal is back.
+s = Session(env={"LEM_RATATUI_OS_AGENT": "/nonexistent/lem-os-agent"}); s.pump(8)
+started = s.plain()
+s.send([b"\x18", b"\x03"]); status = s.wait(8); s.kill()
+told = "OS agent" in s.plain()
+check(15, "without an OS agent the editor runs, and the launcher says why",
+      "Welcome to Lem" in started and told and status == 0,
+      f"started={'Welcome to Lem' in started}, warned={told}, status={status}")
 
 print()
 failed = [r for r in results if not r[2]]
