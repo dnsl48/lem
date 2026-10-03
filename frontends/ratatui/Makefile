@@ -61,7 +61,7 @@ WITH_TOOLCHAIN := PATH="$(TOOLCHAIN)/bin:$$PATH"
 # The Lisp half is a saved image, so any Lisp source that ends up in it
 # must trigger a rebuild, not just this frontend's own files.
 LISP_SOURCES := $(HERE)/build.lisp $(HERE)/lem-ratatui.asd \
-	$(shell find $(HERE)/lisp $(HERE)/display-relay $(HERE)/ipc-channels $(ROOT)/src $(ROOT)/extensions \
+	$(shell find $(HERE)/lisp $(HERE)/display-relay $(HERE)/ipc-channels $(HERE)/os-agent $(ROOT)/src $(ROOT)/extensions \
 		-name '*.lisp' -o -name '*.asd')
 
 .PHONY: all lisp rust dist run test test-rust test-lisp toolchain clean distclean
@@ -115,6 +115,7 @@ test-rust:
 test-lisp: $(QLOT_SETUP) $(CL_PROTOBUFS_STAMP) | $(PROTOC) $(PROTOC_PLUGIN)
 	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/ipc-channels/lem-ipc-channels.asd
 	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/display-relay/lem-display-relay.asd
+	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/os-agent/lem-os-agent.asd
 
 toolchain: $(CL_PROTOBUFS_STAMP) $(PROTOC) $(PROTOC_PLUGIN)
 
