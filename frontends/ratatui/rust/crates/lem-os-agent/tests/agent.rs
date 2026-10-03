@@ -13,8 +13,9 @@ use prost::Message;
 struct Agent {
     child: Child,
     socket: PathBuf,
-    /// Held so the directory outlives the agent.
-    _dir: tempfile::TempDir,
+    /// Held so the directory outlives the agent; also let a test check
+    /// it goes away with the socket.
+    dir: tempfile::TempDir,
 }
 
 impl Drop for Agent {
@@ -38,11 +39,7 @@ fn start(clipboard_file: Option<&Path>) -> Agent {
         None => command.env_remove("LEM_OS_AGENT_CLIPBOARD_FILE"),
     };
     let child = command.spawn().unwrap();
-    Agent {
-        child,
-        socket,
-        _dir: dir,
-    }
+    Agent { child, socket, dir }
 }
 
 fn connect(socket: &Path) -> UnixStream {
@@ -154,11 +151,16 @@ fn pastes_and_copies_through_the_clipboard() {
 #[test]
 fn exits_and_removes_its_socket_when_stdin_closes() {
     let mut agent = start(None);
+    let dir = agent.dir.path().to_path_buf();
     drop(connect(&agent.socket));
     drop(agent.child.stdin.take());
     let status = wait(&mut agent.child, Duration::from_secs(5)).expect("exited");
     assert!(status.success(), "{status}");
     assert!(!agent.socket.exists(), "socket removed");
+    assert!(
+        !dir.exists(),
+        "its (otherwise empty, test-created) directory removed too"
+    );
 }
 
 #[test]

@@ -171,9 +171,11 @@ fn open_log_or_warn(path: &Path, who: &str, warnings: &mut Vec<String>) -> Optio
 
 /// Start the OS agent in a new directory private to this session. Any
 /// failure is a warning: Lem runs without an agent. If the launcher
-/// itself is killed outright, nothing here runs to clean up afterwards —
-/// the (by then empty) directory is left behind; accepted, since no
-/// process can run cleanup code after being killed like that.
+/// itself is killed outright, nothing here runs to clean up afterwards;
+/// accepted, since no process can run cleanup code after being killed
+/// like that — but the agent's own lifeline-driven cleanup still removes
+/// its socket and (being by then empty) this directory, regardless of
+/// why the launcher is gone (`agent.rs`'s module doc).
 fn start_agent(
     program: &Path,
     session: &str,
