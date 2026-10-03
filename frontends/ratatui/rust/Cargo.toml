@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lem-protocols", "crates/lem-ratatui", "crates/lem-ratatui-launcher"]
+members = ["crates/lem-protocols", "crates/lem-os-agent", "crates/lem-ratatui", "crates/lem-ratatui-launcher"]
 exclude = ["vendor/crossterm"]
 
 [workspace.package]
