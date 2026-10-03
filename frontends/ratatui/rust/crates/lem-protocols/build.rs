@@ -5,7 +5,7 @@
 //! needs no `protoc` and no C++ toolchain; only the Lisp side does.
 
 const PROTO_ROOT: &str = "../../../proto";
-const SCHEMAS: &[&str] = &["lem/display/v1/display.proto"];
+const SCHEMAS: &[&str] = &["lem/display/v1/display.proto", "lem/os/v1/os.proto"];
 
 fn main() {
     for schema in SCHEMAS {

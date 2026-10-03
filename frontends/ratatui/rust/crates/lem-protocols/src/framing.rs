@@ -3,7 +3,7 @@
 //! Each message is framed with protobuf's standard length-delimited format,
 //! a varint byte length and then the message, which `prost` produces with
 //! `encode_length_delimited` and the Lisp side with
-//! `lem-display-relay/protobuf/framing`. `prost` decodes the format from a
+//! `lem-ipc-channels`. `prost` decodes the format from a
 //! buffer; a pipe has to be read up to the end of the length first, which is
 //! what [`read_delimited`] does.
 
