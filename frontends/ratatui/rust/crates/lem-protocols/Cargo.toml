@@ -1,6 +1,6 @@
 [package]
 name = "lem-protocols"
-description = "Types and framing for Lem's protocols, one per link: lem.display.v1 between lem-display-relay and a display."
+description = "Types and framing for Lem's protocols, one per link: lem.display.v1 with a display, lem.os.v1 with the OS agent."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
