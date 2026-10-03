@@ -244,8 +244,15 @@ fn run_both(
     warnings: &mut Vec<String>,
 ) -> Result<(ExitStatus, Option<ExitStatus>)> {
     let mut lem = duct::cmd(&programs.lisp, args).env("LEM_SESSION_ID", session);
+    // Lem must see the socket of *this* session's agent, and none at all
+    // when there is none — never one inherited from the launcher's own
+    // environment (e.g. a nested `lem-ratatui`, started from inside a
+    // Lem whose session has an agent, must not connect to that outer
+    // one).
     if let Some(running) = agent {
         lem = lem.env("LEM_OS_AGENT_SOCKET", &running.socket);
+    } else {
+        lem = lem.env_remove("LEM_OS_AGENT_SOCKET");
     }
     // `stdin_file`/`stdout_file` take the pipe ends by value, so the whole
     // chain through `start` must be one expression, not bound partway:
