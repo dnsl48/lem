@@ -40,6 +40,16 @@ fn run(socket: &std::path::Path) -> anyhow::Result<()> {
     let listener =
         UnixListener::bind(socket).with_context(|| format!("listening on {}", socket.display()))?;
     watch_lifeline(socket.to_path_buf());
+    // Bound, so ours to remove: on every way out of the loop below, not
+    // only the lifeline's. (The lifeline's own exit, on stdin closing,
+    // removes it separately — `process::exit` runs no destructors here.)
+    cleanup(socket, accept(&listener))
+}
+
+#[cfg(unix)]
+fn accept(listener: &std::os::unix::net::UnixListener) -> anyhow::Result<()> {
+    use anyhow::Context;
+
     let session = std::env::var("LEM_SESSION_ID").unwrap_or_default();
     let mut clipboard = clipboard::select();
     for stream in listener.incoming() {
@@ -51,6 +61,16 @@ fn run(socket: &std::path::Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Remove `socket` and pass `result` through, whichever it is. Called only
+/// once the agent owns `socket` (bind succeeded), so this is the one path
+/// out of `run` that returns instead of calling `process::exit` — it must
+/// not leave the socket behind either.
+#[cfg(unix)]
+fn cleanup<T>(socket: &std::path::Path, result: anyhow::Result<T>) -> anyhow::Result<T> {
+    let _ = std::fs::remove_file(socket);
+    result
 }
 
 #[cfg(not(unix))]
@@ -66,4 +86,21 @@ fn watch_lifeline(socket: PathBuf) {
         let _ = std::fs::remove_file(&socket);
         std::process::exit(0);
     });
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_removes_the_socket_whether_the_loop_errored_or_not() {
+        for result in [Ok(()), Err(anyhow::anyhow!("accept failed"))] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            let socket = file.path().to_path_buf();
+            let ok = result.is_ok();
+            let outcome = cleanup(&socket, result);
+            assert_eq!(outcome.is_ok(), ok);
+            assert!(!socket.exists(), "socket removed");
+        }
+    }
 }
