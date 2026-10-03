@@ -137,6 +137,23 @@ readable). SET, when given, is called with each text Lem copies."
       (setf agent:*connect-timeout* saved-timeout)
       (setf lem-os-agent::*agent* nil))))
 
+(deftest a-second-start-does-not-drop-a-working-agent
+  ;; The agent serves one connection at a time: a second `start' while
+  ;; connected would never get a second Welcome, and the thread setting
+  ;; `*agent*' to NIL afterwards would orphan the live connection.
+  (with-fake-agent (path (clipboard-agent))
+    (unwind-protect
+        (let ((thread (agent:start :path path :session-id "test")))
+          (bt2:join-thread thread)
+          (let ((current (agent:current-agent)))
+            (ok (agent:connected-p current))
+            (ok (null (agent:start :path path :session-id "test"))
+                "does nothing while already connected")
+            (ok (eq current (agent:current-agent)) "current-agent unchanged")
+            (ok (agent:connected-p (agent:current-agent)) "still connected")))
+      (agent:disconnect)
+      (setf lem-os-agent::*agent* nil))))
+
 ;;; The clipboard
 
 (deftest an-agent-without-a-clipboard-is-not-asked
