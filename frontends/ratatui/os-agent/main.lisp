@@ -20,6 +20,12 @@
 answers; NIL before that, and when there is none. Read it with
 `current-agent'.")
 
+(defvar *connecting* nil
+  "True from one `start' spawning its connect thread until that thread
+sets `*agent*' (or gives up); read and set by `start' to refuse a second
+call while the first is still in flight. The agent serves one connection
+at a time, so two at once would race for its one `Welcome'.")
+
 (defparameter *connect-timeout* 1
   "Seconds `connect' tries the agent's socket, and then waits for its
 `Welcome'. The launcher starts the agent before Lem, so it is normally
@@ -93,16 +99,27 @@ not welcome this editor within TIMEOUT seconds."
                    (session-id (or (uiop:getenv "LEM_SESSION_ID") "")))
   "Connect to the agent the launcher started, at PATH, on a new thread, and
 make it the `current-agent' once it answers. Returns the thread, or NIL
-when there is no PATH. Until the agent answers, and if it never does, Lem
-runs as if there were none."
-  (when (and path (plusp (length path)))
+when there is no PATH, a connection is already up, or one started by an
+earlier call to this function is still in flight. Until the agent
+answers, and if it never does, Lem runs as if there were none.
+
+The agent serves one connection at a time: a second call while connected
+would never get a second `Welcome', and the thread it starts would then
+set `*agent*' to NIL once it gives up, orphaning the live connection. A
+second call is therefore a no-op, not a replacement."
+  (when (and path (plusp (length path))
+             (not (connected-p))
+             (not *connecting*))
+    (setf *connecting* t)
     (bt2:make-thread (lambda ()
                        ;; An error escaping this thread would end the
                        ;; process: the debugger is disabled (transport.lisp).
-                       (setf *agent* (handler-case (connect path session-id)
-                                       (error (condition)
-                                         (log:warn "lem-os-agent: connecting: ~A" condition)
-                                         nil))))
+                       (unwind-protect
+                            (setf *agent* (handler-case (connect path session-id)
+                                            (error (condition)
+                                              (log:warn "lem-os-agent: connecting: ~A" condition)
+                                              nil)))
+                         (setf *connecting* nil)))
                      :name "lem-os-agent connect")))
 
 (defun connected-p (&optional (agent (current-agent)))
