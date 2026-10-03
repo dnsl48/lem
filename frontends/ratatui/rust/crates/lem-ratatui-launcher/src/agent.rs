@@ -14,7 +14,6 @@
 //! that is accepted.
 
 use std::ffi::OsString;
-use std::fs::File;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
@@ -28,10 +27,17 @@ pub struct Agent {
 
 impl Agent {
     /// Start `program --socket <socket>`, with `session` as its
-    /// `LEM_SESSION_ID`. Its stderr goes to `log` when there is one;
-    /// discarded otherwise, which is how the launcher copes with having
-    /// nowhere to put a log file.
-    pub fn start(program: &Path, socket: &Path, log: Option<&Path>, session: &str) -> Result<Self> {
+    /// `LEM_SESSION_ID`. Its stderr goes to `log` when there is one and it
+    /// can be created; discarded otherwise (a warning, not a failure —
+    /// the agent still starts), same as when the launcher has nowhere to
+    /// put a log file at all.
+    pub fn start(
+        program: &Path,
+        socket: &Path,
+        log: Option<&Path>,
+        session: &str,
+        warnings: &mut Vec<String>,
+    ) -> Result<Self> {
         let (stdin, lifeline) = os_pipe::pipe().context("creating a pipe")?;
         let args = [OsString::from("--socket"), socket.as_os_str().to_owned()];
         let cmd = duct::cmd(program, args)
@@ -43,15 +49,13 @@ impl Agent {
         // not bound partway: a bound `Expression` lives to the end of
         // this function regardless of being shadowed, keeping its copy
         // of the pipe open longer than intended.
-        let start = match log {
-            Some(log) => {
-                let stderr =
-                    File::create(log).with_context(|| format!("creating {}", log.display()))?;
-                cmd.stdin_file(stdin)
-                    .stdout_null()
-                    .stderr_file(stderr)
-                    .start()
-            }
+        let start = match log.and_then(|log| crate::open_log_or_warn(log, "the OS agent", warnings))
+        {
+            Some(stderr) => cmd
+                .stdin_file(stdin)
+                .stdout_null()
+                .stderr_file(stderr)
+                .start(),
             None => cmd.stdin_file(stdin).stdout_null().stderr_null().start(),
         };
         let handle = start.with_context(|| format!("starting {}", program.display()))?;
@@ -116,6 +120,7 @@ mod tests {
             &dir.path().join("s"),
             Some(&dir.path().join("log")),
             "session",
+            &mut Vec::new(),
         )
         .unwrap();
         std::thread::sleep(Duration::from_millis(100));
@@ -136,6 +141,7 @@ mod tests {
             &dir.path().join("s"),
             Some(&dir.path().join("log")),
             "session",
+            &mut Vec::new(),
         )
         .unwrap();
         assert!(agent.stop(Duration::from_millis(100)).unwrap().is_none());
@@ -150,7 +156,8 @@ mod tests {
                 &missing,
                 &dir.path().join("s"),
                 Some(&dir.path().join("log")),
-                "session"
+                "session",
+                &mut Vec::new(),
             )
             .is_err()
         );
@@ -170,6 +177,7 @@ mod tests {
             &socket,
             Some(&dir.path().join("log")),
             "the-session-id",
+            &mut Vec::new(),
         )
         .unwrap();
         agent.stop(Duration::from_secs(5)).unwrap();
@@ -183,9 +191,40 @@ mod tests {
     fn without_a_log_path_its_stderr_is_discarded_not_fatal() {
         let dir = tempfile::tempdir().unwrap();
         let program = script(dir.path(), "cat >/dev/null");
-        let agent = Agent::start(&program, &dir.path().join("s"), None, "session").unwrap();
+        let agent = Agent::start(
+            &program,
+            &dir.path().join("s"),
+            None,
+            "session",
+            &mut Vec::new(),
+        )
+        .unwrap();
         let status = agent.stop(Duration::from_secs(5)).unwrap();
         assert!(status.expect("exited by itself").success());
         assert!(!dir.path().join("log").exists(), "no log file was created");
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_created_is_a_warning_not_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = script(dir.path(), "cat >/dev/null");
+        // `not_a_dir` is a regular file, so a log path under it can never
+        // be created (ENOTDIR) — root-proof, unlike a 0500 directory.
+        let not_a_dir = dir.path().join("not-a-dir");
+        std::fs::write(&not_a_dir, "").unwrap();
+        let log = not_a_dir.join("log");
+        let mut warnings = Vec::new();
+        let agent = Agent::start(
+            &program,
+            &dir.path().join("s"),
+            Some(&log),
+            "session",
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("OS agent"), "{warnings:?}");
+        let status = agent.stop(Duration::from_secs(5)).unwrap();
+        assert!(status.expect("exited by itself: not fatal").success());
     }
 }
