@@ -6,10 +6,10 @@
    :set-clipboard
    :set-clipboard-text
    :clipboard-request)
+  (:import-from :lem-ipc-channels :now-microseconds)
   (:export :+protocol-version+
            :codec-state
            :make-codec-state
-           :next-seq
            :now-microseconds
            :encode
            :welcome
@@ -41,25 +41,15 @@
 key and the relay names it (ADR 0014).")
 
 (defstruct (codec-state (:constructor make-codec-state ()))
-  "What the codec remembers across messages: the `seq' last given to an
-outgoing message, and the styles interned so far.
+  "What the codec remembers across messages: the styles interned so far.
 
 Style ids are the codec's (ADR 0012): the model carries styles as values,
 and the codec gives each distinct one an id the first time a frame uses
 it, sending its definition in that frame. Ids are stable for the
-session; 0 is no style."
-  (seq 0)
+session; 0 is no style. Messages are numbered by the channel, which calls
+`encode' under its lock, so interning follows wire order."
   (style-ids (make-hash-table :test 'equal))
   (last-style-id 0))
-
-(defun next-seq (state)
-  "Number the next outgoing message. Call under the output lock, so
-numbers follow wire order (ADR 0013)."
-  (incf (codec-state-seq state)))
-
-(defun now-microseconds ()
-  "Microseconds on the relay's monotonic clock (ADR 0013)."
-  (floor (* (get-internal-real-time) 1000000) internal-time-units-per-second))
 
 ;;; Encoding
 

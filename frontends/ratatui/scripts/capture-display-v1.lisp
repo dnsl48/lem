@@ -40,7 +40,7 @@ and its text-format twin."
                        :direction :output :if-exists :supersede
                        :element-type '(unsigned-byte 8))
     (dolist (body bodies)
-      (lem-display-relay/protobuf/framing:write-delimited out body)))
+      (lem-ipc-channels:write-delimited out body)))
   (with-open-file (out (merge-pathnames "relay-session.v1.txt" *fixtures*)
                        :direction :output :if-exists :supersede
                        :external-format :utf-8)
@@ -54,12 +54,13 @@ and its text-format twin."
 (defun capture ()
   (let ((relay (make-instance 'capture-relay))
         (state (lem-display-relay/protobuf/codec:make-codec-state))
+        (seq 0)
         (bodies '()))
     (setf (lem-display-relay/relay:relay-sink relay)
           (lambda (message)
-            (let ((seq (lem-display-relay/protobuf/codec:next-seq state)))
-              (push (lem-display-relay/protobuf/codec:encode message state seq) bodies)
-              seq)))
+            (incf seq)
+            (push (lem-display-relay/protobuf/codec:encode message state seq) bodies)
+            seq))
     (lem:with-current-buffers ()
       (lem:with-implementation relay
         (lem:setup-first-frame)
