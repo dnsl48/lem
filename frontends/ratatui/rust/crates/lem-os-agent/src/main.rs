@@ -11,6 +11,9 @@ mod serve;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
+
+use clipboard::Clipboard;
 
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
@@ -39,23 +42,28 @@ fn run(socket: &std::path::Path) -> anyhow::Result<()> {
     // Binding fails when the path exists: a socket is never taken over.
     let listener =
         UnixListener::bind(socket).with_context(|| format!("listening on {}", socket.display()))?;
-    watch_lifeline(socket.to_path_buf());
+    // Shared with the lifeline thread, so it can take the clipboard out
+    // and drop it — running its `Drop` — before this process exits.
+    let clipboard = Arc::new(Mutex::new(clipboard::select()));
+    watch_lifeline(socket.to_path_buf(), Arc::clone(&clipboard));
     // Bound, so ours to remove: on every way out of the loop below, not
     // only the lifeline's. (The lifeline's own exit, on stdin closing,
     // removes it separately — `process::exit` runs no destructors here.)
-    cleanup(socket, accept(&listener))
+    cleanup(socket, accept(&listener, &clipboard))
 }
 
 #[cfg(unix)]
-fn accept(listener: &std::os::unix::net::UnixListener) -> anyhow::Result<()> {
+fn accept(
+    listener: &std::os::unix::net::UnixListener,
+    clipboard: &Mutex<Option<Box<dyn Clipboard>>>,
+) -> anyhow::Result<()> {
     use anyhow::Context;
 
     let session = std::env::var("LEM_SESSION_ID").unwrap_or_default();
-    let mut clipboard = clipboard::select();
     for stream in listener.incoming() {
         let stream = stream.context("accepting a connection")?;
         let reader = stream.try_clone().context("cloning the connection")?;
-        match serve::serve(reader, stream, &mut clipboard) {
+        match serve::serve(reader, stream, clipboard) {
             Ok(_) => eprintln!("lem-os-agent: session {session}: Lem hung up"),
             Err(error) => eprintln!("lem-os-agent: session {session}: {error:#}"),
         }
@@ -78,14 +86,27 @@ fn run(_socket: &std::path::Path) -> anyhow::Result<()> {
     anyhow::bail!("only Unix is supported")
 }
 
-/// Exit when stdin closes, removing the socket first.
+/// Exit when stdin closes: hand the clipboard back first, then remove
+/// the socket.
 #[cfg(unix)]
-fn watch_lifeline(socket: PathBuf) {
+fn watch_lifeline(socket: PathBuf, clipboard: Arc<Mutex<Option<Box<dyn Clipboard>>>>) {
     std::thread::spawn(move || {
         let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        hand_back_clipboard(&clipboard);
         let _ = std::fs::remove_file(&socket);
         std::process::exit(0);
     });
+}
+
+/// Take the clipboard out of the slot `accept` shares with us, and drop
+/// it here, running its own `Drop` — on X11, `arboard`'s asks the
+/// clipboard manager to take over the selection, up to ~100 ms. Called
+/// before `watch_lifeline` exits the process: `process::exit` runs no
+/// destructors, so whatever is still in the slot by then would never be
+/// handed back, and a clipboard manager would lose what Lem copied.
+#[cfg(unix)]
+fn hand_back_clipboard(clipboard: &Mutex<Option<Box<dyn Clipboard>>>) {
+    drop(clipboard.lock().unwrap().take());
 }
 
 #[cfg(all(test, unix))]
@@ -102,5 +123,45 @@ mod tests {
             assert_eq!(outcome.is_ok(), ok);
             assert!(!socket.exists(), "socket removed");
         }
+    }
+
+    /// A clipboard that records whether its `Drop` ran, standing in for
+    /// `arboard`'s (which, on X11, hands the selection to a clipboard
+    /// manager there).
+    struct Recording(Arc<std::sync::atomic::AtomicBool>);
+
+    impl Clipboard for Recording {
+        fn get(&mut self) -> Option<String> {
+            None
+        }
+        fn set(&mut self, _text: &str) {}
+    }
+
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn hand_back_clipboard_drops_what_was_in_the_slot() {
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let clipboard: Arc<Mutex<Option<Box<dyn Clipboard>>>> =
+            Arc::new(Mutex::new(Some(Box::new(Recording(Arc::clone(&dropped))))));
+
+        hand_back_clipboard(&clipboard);
+
+        assert!(
+            dropped.load(std::sync::atomic::Ordering::SeqCst),
+            "Drop ran"
+        );
+        assert!(clipboard.lock().unwrap().is_none(), "taken out of the slot");
+    }
+
+    #[test]
+    fn hand_back_clipboard_is_a_no_op_with_none_in_the_slot() {
+        let clipboard: Arc<Mutex<Option<Box<dyn Clipboard>>>> = Arc::new(Mutex::new(None));
+        hand_back_clipboard(&clipboard); // must not panic
+        assert!(clipboard.lock().unwrap().is_none());
     }
 }

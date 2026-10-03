@@ -3,8 +3,10 @@
 
 use std::path::PathBuf;
 
-/// Somewhere text can be copied to and pasted from.
-pub trait Clipboard {
+/// Somewhere text can be copied to and pasted from. `Send`: it is taken
+/// out of the shared slot `main` hands the lifeline thread and dropped
+/// there (on-session-end handoff), on whichever thread that runs on.
+pub trait Clipboard: Send {
     /// The text on it, or `None` when there is nothing readable.
     fn get(&mut self) -> Option<String>;
     fn set(&mut self, text: &str);

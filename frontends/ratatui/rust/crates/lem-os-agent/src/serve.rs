@@ -2,6 +2,7 @@
 //! hangs up.
 
 use std::io::{self, Read, Write};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -53,10 +54,15 @@ fn read(input: &mut impl Read) -> Result<Option<v1::ToAgent>> {
 /// The first message must be a `Hello` with a protocol version; anything
 /// else ends the connection unanswered. A message this revision does not
 /// know decodes with no `message` and is ignored, as a second `Hello` is.
+///
+/// `clipboard` is shared with the lifeline thread (`main.rs`), which can
+/// take it out from under us on the session's way out; locked only for
+/// each access, not for the whole connection, so that taking it does not
+/// wait on a Lem that is still connected.
 pub fn serve(
     mut input: impl Read,
     output: impl Write,
-    clipboard: &mut Option<Box<dyn Clipboard>>,
+    clipboard: &Mutex<Option<Box<dyn Clipboard>>>,
 ) -> Result<String> {
     let mut writer = Writer::new(output);
     let first = read(&mut input)?.context("Lem hung up before Hello")?;
@@ -70,7 +76,7 @@ pub fn serve(
         protocol_version: v1::PROTOCOL_VERSION,
         session_id: hello.session_id.clone(),
         capabilities: Some(v1::Capabilities {
-            clipboard: clipboard.is_some(),
+            clipboard: clipboard.lock().unwrap().is_some(),
         }),
         reply_to: first.seq,
     }))?;
@@ -78,14 +84,14 @@ pub fn serve(
     while let Some(envelope) = read(&mut input)? {
         match envelope.message {
             Some(to_agent::Message::ClipboardRequest(_)) => {
-                let text = clipboard.as_mut().and_then(|clipboard| clipboard.get());
+                let text = clipboard.lock().unwrap().as_mut().and_then(|c| c.get());
                 writer.send(to_editor::Message::ClipboardReply(v1::ClipboardReply {
                     reply_to: envelope.seq,
                     text,
                 }))?;
             }
             Some(to_agent::Message::SetClipboard(set)) => {
-                if let Some(clipboard) = clipboard.as_mut() {
+                if let Some(clipboard) = clipboard.lock().unwrap().as_mut() {
                     clipboard.set(&set.text);
                 }
             }
@@ -97,27 +103,34 @@ pub fn serve(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use super::*;
 
-    /// A clipboard the test can look into afterwards.
-    struct Memory(Rc<RefCell<Option<String>>>);
+    /// A clipboard the test can look into afterwards. `Arc<Mutex<_>>`,
+    /// not `Rc<RefCell<_>>`: `Clipboard` requires `Send` (main.rs shares
+    /// one with its lifeline thread), so a test double must satisfy that
+    /// too.
+    struct Memory(Arc<Mutex<Option<String>>>);
 
     impl Clipboard for Memory {
         fn get(&mut self) -> Option<String> {
-            self.0.borrow().clone()
+            self.0.lock().unwrap().clone()
         }
         fn set(&mut self, text: &str) {
-            *self.0.borrow_mut() = Some(text.to_owned());
+            *self.0.lock().unwrap() = Some(text.to_owned());
         }
     }
 
     #[allow(clippy::type_complexity)]
-    fn memory(text: Option<&str>) -> (Option<Box<dyn Clipboard>>, Rc<RefCell<Option<String>>>) {
-        let cell = Rc::new(RefCell::new(text.map(str::to_owned)));
-        (Some(Box::new(Memory(cell.clone()))), cell)
+    fn memory(
+        text: Option<&str>,
+    ) -> (
+        Mutex<Option<Box<dyn Clipboard>>>,
+        Arc<Mutex<Option<String>>>,
+    ) {
+        let cell = Arc::new(Mutex::new(text.map(str::to_owned)));
+        (Mutex::new(Some(Box::new(Memory(cell.clone())))), cell)
     }
 
     fn wire(messages: &[(u64, to_agent::Message)]) -> Vec<u8> {
@@ -158,9 +171,9 @@ mod tests {
 
     #[test]
     fn welcomes_lem_with_what_it_can_do() {
-        let (mut clipboard, _) = memory(None);
+        let (clipboard, _) = memory(None);
         let mut out = Vec::new();
-        let session = serve(wire(&[(1, hello(1))]).as_slice(), &mut out, &mut clipboard).unwrap();
+        let session = serve(wire(&[(1, hello(1))]).as_slice(), &mut out, &clipboard).unwrap();
         assert_eq!(session, "s");
         let sent = sent(&out);
         assert_eq!(sent.len(), 1);
@@ -178,7 +191,12 @@ mod tests {
     #[test]
     fn without_a_clipboard_it_says_so() {
         let mut out = Vec::new();
-        serve(wire(&[(1, hello(1))]).as_slice(), &mut out, &mut None).unwrap();
+        serve(
+            wire(&[(1, hello(1))]).as_slice(),
+            &mut out,
+            &Mutex::new(None),
+        )
+        .unwrap();
         assert_eq!(
             welcome(&sent(&out)[0]).capabilities,
             Some(v1::Capabilities { clipboard: false })
@@ -187,7 +205,7 @@ mod tests {
 
     #[test]
     fn answers_a_clipboard_request_by_its_seq() {
-        let (mut clipboard, _) = memory(Some("pasted"));
+        let (clipboard, _) = memory(Some("pasted"));
         let mut out = Vec::new();
         let input = wire(&[
             (1, hello(1)),
@@ -196,7 +214,7 @@ mod tests {
                 to_agent::Message::ClipboardRequest(v1::ClipboardRequest {}),
             ),
         ]);
-        serve(input.as_slice(), &mut out, &mut clipboard).unwrap();
+        serve(input.as_slice(), &mut out, &clipboard).unwrap();
         let sent = sent(&out);
         assert_eq!(sent[1].seq, 2, "numbered in order");
         assert_eq!(
@@ -218,7 +236,7 @@ mod tests {
                 to_agent::Message::ClipboardRequest(v1::ClipboardRequest {}),
             ),
         ]);
-        serve(input.as_slice(), &mut out, &mut None).unwrap();
+        serve(input.as_slice(), &mut out, &Mutex::new(None)).unwrap();
         assert_eq!(
             sent(&out)[1].message,
             Some(to_editor::Message::ClipboardReply(v1::ClipboardReply {
@@ -230,7 +248,7 @@ mod tests {
 
     #[test]
     fn sets_the_clipboard() {
-        let (mut clipboard, cell) = memory(None);
+        let (clipboard, cell) = memory(None);
         let input = wire(&[
             (1, hello(1)),
             (
@@ -240,8 +258,8 @@ mod tests {
                 }),
             ),
         ]);
-        serve(input.as_slice(), &mut Vec::new(), &mut clipboard).unwrap();
-        assert_eq!(cell.borrow().as_deref(), Some("copied"));
+        serve(input.as_slice(), &mut Vec::new(), &clipboard).unwrap();
+        assert_eq!(cell.lock().unwrap().as_deref(), Some("copied"));
     }
 
     #[test]
@@ -251,7 +269,7 @@ mod tests {
             to_agent::Message::ClipboardRequest(v1::ClipboardRequest {}),
         )]);
         let mut out = Vec::new();
-        assert!(serve(input.as_slice(), &mut out, &mut None).is_err());
+        assert!(serve(input.as_slice(), &mut out, &Mutex::new(None)).is_err());
         assert!(
             out.is_empty(),
             "nothing sent to a peer that did not say Hello"
@@ -261,12 +279,19 @@ mod tests {
     #[test]
     fn a_hello_without_a_protocol_version_is_refused() {
         let mut out = Vec::new();
-        assert!(serve(wire(&[(1, hello(0))]).as_slice(), &mut out, &mut None).is_err());
+        assert!(
+            serve(
+                wire(&[(1, hello(0))]).as_slice(),
+                &mut out,
+                &Mutex::new(None)
+            )
+            .is_err()
+        );
         assert!(out.is_empty());
     }
 
     #[test]
     fn hanging_up_before_hello_is_an_error() {
-        assert!(serve(&[][..], &mut Vec::new(), &mut None).is_err());
+        assert!(serve(&[][..], &mut Vec::new(), &Mutex::new(None)).is_err());
     }
 }
