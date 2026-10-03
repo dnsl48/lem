@@ -90,15 +90,16 @@ $(LAUNCHER): $(LISP_BIN) $(RUST_BIN)
 		'LEM_RATATUI_LISP="$$here/lem-ratatui-lisp" exec "$$here/../rust/target/release/lem-ratatui-launcher" "$$@"' > $@
 	chmod +x $@
 
-# The launcher, with the Lisp image and the display binary embedded (zstd)
-# and unpacked to ~/.cache/lem-ratatui/ on first launch; see
-# rust/crates/lem-ratatui-launcher/src/bundle.rs. The display binary is
-# built first because the launcher's build script reads it.
+# The launcher, with the Lisp image, the display binary and the OS agent
+# embedded (zstd) and unpacked to ~/.cache/lem-ratatui/ on first launch; see
+# rust/crates/lem-ratatui-launcher/src/bundle.rs. The display binary and the
+# agent are built first because the launcher's build script reads them.
 dist: $(DIST_BIN)
 
 $(DIST_BIN): $(LISP_BIN) FORCE
-	cd $(HERE)/rust && $(CARGO) build --profile dist -p lem-ratatui
+	cd $(HERE)/rust && $(CARGO) build --profile dist -p lem-ratatui -p lem-os-agent
 	cd $(HERE)/rust && LEM_RATATUI_LISP=$(LISP_BIN) LEM_RATATUI_TERMINAL=$(HERE)/rust/target/dist/lem-ratatui \
+		LEM_RATATUI_OS_AGENT=$(HERE)/rust/target/dist/lem-os-agent \
 		$(CARGO) build --profile dist -p lem-ratatui-launcher --features bundle
 	cp $(HERE)/rust/target/dist/lem-ratatui-launcher $@
 

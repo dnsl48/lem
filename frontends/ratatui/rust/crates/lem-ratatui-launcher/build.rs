@@ -20,7 +20,7 @@ mod bundle {
     /// What gets embedded: the variable naming each file, where it is
     /// looked for otherwise (relative to this crate), and the name it is
     /// written under in OUT_DIR.
-    const PAYLOADS: [(&str, &str, &str); 2] = [
+    const PAYLOADS: [(&str, &str, &str); 3] = [
         (
             "LEM_RATATUI_LISP",
             "../../../dist/lem-ratatui-lisp",
@@ -30,6 +30,11 @@ mod bundle {
             "LEM_RATATUI_TERMINAL",
             "../../target/dist/lem-ratatui",
             "lem-ratatui.zst",
+        ),
+        (
+            "LEM_RATATUI_OS_AGENT",
+            "../../target/dist/lem-os-agent",
+            "lem-os-agent.zst",
         ),
     ];
 
