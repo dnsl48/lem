@@ -104,6 +104,39 @@ readable). SET, when given, is called with each text Lem copies."
   (ok (null (agent:start :path nil)))
   (ok (null (agent:start :path ""))))
 
+(deftest start-returns-at-once-and-connects-in-the-background
+  ;; The fake agent answers at once, so the default `*connect-timeout*'
+  ;; (unchanged) is already enough: no need to lower it for this test.
+  (with-fake-agent (path (clipboard-agent))
+    (unwind-protect
+        (let ((before (get-internal-real-time))
+              (thread (agent:start :path path :session-id "test")))
+          (ok thread)
+          (ok (< (/ (- (get-internal-real-time) before) internal-time-units-per-second) 0.5)
+              "start returns before the handshake, not after it")
+          (bt2:join-thread thread)
+          (let ((current (agent:current-agent)))
+            (ok current)
+            (ok (agent:connected-p current))
+            (ok (agent:capable-p :clipboard current))))
+      (agent:disconnect)
+      (setf lem-os-agent::*agent* nil))))
+
+(deftest start-leaves-no-current-agent-when-none-ever-answers
+  ;; Bound low, and as a global assignment rather than a `let': the
+  ;; connect thread reads `*connect-timeout*''s global value (same
+  ;; reasoning as above), so only a `setf' reaches it.
+  (let ((saved-timeout agent:*connect-timeout*))
+    (setf agent:*connect-timeout* 0.2)
+    (unwind-protect
+        (with-fake-agent (path (lambda (message) (declare (ignore message)) '()))
+          (let ((thread (agent:start :path path :session-id "test")))
+            (ok thread)
+            (bt2:join-thread thread)
+            (ok (null (agent:current-agent)))))
+      (setf agent:*connect-timeout* saved-timeout)
+      (setf lem-os-agent::*agent* nil))))
+
 ;;; The clipboard
 
 (deftest an-agent-without-a-clipboard-is-not-asked
