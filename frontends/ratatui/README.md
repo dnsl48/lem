@@ -51,8 +51,8 @@ so it must not be a TTY; the display's does too, so it draws on
 
 The launcher also starts `lem-os-agent`, the OS agent, when it finds
 one, with a socket in a directory private to the session; Lem connects
-to it there (`lem.os.v1`). It is optional: without it the clipboard is
-the display's. See [`docs/adr/0019`](docs/adr/0019-an-os-agent-and-a-link-per-peer.md).
+to it there (`lem.os.v1`). It is optional: without it, copying goes to
+the terminal with OSC 52 where the terminal takes it (ADR 0020). See [`docs/adr/0019`](docs/adr/0019-an-os-agent-and-a-link-per-peer.md).
 
 See [`docs/adr/0008`](docs/adr/0008-a-launcher-owns-the-processes.md).
 
@@ -78,7 +78,7 @@ dist/                        every build output (gitignored): the Lisp
 lem-ratatui.asd              ASDF system; :pathname "lisp/"
 lisp/
   implementation.lisp        the `ratatui' class: relay + capability flags
-  clipboard.lisp             the agent's clipboard, else the display's
+  clipboard.lisp             the agent's clipboard, else the terminal's (OSC 52)
   transport.lisp             stdin/stdout as the wire, everything else muffled
   links.lisp                 web addresses as hyperlinks (ADR 0018)
   main.lisp                  entry point, and lem-if:invoke
@@ -252,8 +252,12 @@ When the agent has no clipboard — over SSH, in a container, or with no
 agent — copying goes to the terminal instead, with OSC 52, in terminals
 known to take it: kitty, WezTerm, foot, Alacritty, Ghostty, Contour,
 iTerm2 and Windows Terminal. Over SSH that is the clipboard on your own
-machine. `LEM_RATATUI_OSC52=1` or `0` settles it for any other terminal
-(tmux with `set-clipboard on`, say); `M-x describe-terminal-capabilities`
+machine — but WezTerm, iTerm2 and Windows Terminal are recognised by
+variables ssh does not pass on (`TERM_PROGRAM`, `WT_SESSION`), and Ghostty
+often runs as `xterm-256color` on hosts without its terminfo, so over SSH
+set `LEM_RATATUI_OSC52=1` on the remote side (or `SendEnv`/`AcceptEnv
+TERM_PROGRAM`). `LEM_RATATUI_OSC52=1` or `0` settles it for any other
+terminal too (tmux with `set-clipboard on`, say); `M-x describe-terminal-capabilities`
 shows what was decided. The display cannot read the terminal's
 clipboard, so `C-y` then yanks Lem's own kill ring; paste from your
 machine with the terminal's own paste.

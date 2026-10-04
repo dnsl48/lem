@@ -1,6 +1,8 @@
 # 0019. An OS agent, and a link per peer rather than a bus
 
-**Status:** Accepted — October 2026
+**Status:** Accepted — October 2026; revised by
+[0020](0020-the-clipboard-belongs-to-the-agent.md): the clipboard is the
+agent's alone, and the display offers OSC 52 instead of `arboard`.
 **Revises:** [0008](0008-a-launcher-owns-the-processes.md) (what the
 launcher starts), [0009](0009-our-own-relay.md) (the relay's name),
 [0013](0013-icons-and-mouse-input.md) (who makes the session id)

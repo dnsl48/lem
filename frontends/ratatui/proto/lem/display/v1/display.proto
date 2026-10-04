@@ -90,12 +90,15 @@ message Hello {
   optional uint32 foreground = 5;
   optional uint32 background = 6;
   // Absent means an older peer or unknown capabilities. A present message
-  // with all flags false means the display confirmed legacy keyboard input.
+  // with all keyboard flags false means the display confirmed legacy
+  // keyboard input.
   TerminalCapabilities capabilities = 7;
 }
 
-// Features confirmed active for this terminal session, after negotiation.
-// These describe what can be reported, not what any individual key was.
+// Features of this terminal session. The keyboard flags are confirmed
+// active after negotiation; they describe what can be reported, not what any
+// individual key was. clipboard_write is not negotiated but decided by the
+// terminal's identity (ADR 0020).
 message TerminalCapabilities {
   bool keyboard_disambiguation = 1;
   bool alternate_key_reporting = 2;

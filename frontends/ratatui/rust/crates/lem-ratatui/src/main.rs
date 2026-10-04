@@ -50,6 +50,12 @@ fn report(frames: usize, metrics: &metrics::Frames) {
     eprintln!("lem-ratatui: {}", metrics.report());
 }
 
+/// Whether this display writes the terminal's clipboard with OSC 52 (ADR
+/// 0020): only with a terminal to write it to, whatever `env` says.
+fn clipboard_write(terminal: bool, env: impl Fn(&str) -> Option<String>) -> bool {
+    terminal && support::osc52(env)
+}
+
 /// This session's id: the launcher's, from `LEM_SESSION_ID` (ADR 0019),
 /// or a new UUIDv7 when the display runs without one, as by hand.
 fn session_id(from_launcher: Option<String>) -> String {
@@ -71,8 +77,7 @@ fn main() -> Result<()> {
     let guard = term::Guard::new_if_interactive()?;
     let styled_underlines = support::styled_underlines(|name| std::env::var(name).ok());
     let hyperlinks = support::hyperlinks(|name| std::env::var(name).ok());
-    // Only with a terminal to write it to (ADR 0020).
-    let osc52 = guard.is_some() && support::osc52(|name| std::env::var(name).ok());
+    let osc52 = clipboard_write(guard.is_some(), |name| std::env::var(name).ok());
     let mut presenter = match &guard {
         Some(guard) => Some(
             Presenter::new(BufWriter::new(guard.writer()?), styled_underlines)
@@ -223,6 +228,13 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_headless_display_never_writes_the_clipboard() {
+        let forced = |name: &str| (name == "LEM_RATATUI_OSC52").then(|| "1".to_owned());
+        assert!(!clipboard_write(false, forced));
+        assert!(clipboard_write(true, forced));
+    }
 
     #[test]
     fn the_launchers_session_id_is_used() {

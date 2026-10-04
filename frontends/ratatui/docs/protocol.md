@@ -68,6 +68,8 @@ follows on its own. A `Hello` the relay cannot serve (no
 `protocol_version`) gets `Exit` with the reason, not silence.
 
 Schema revision **2** adds optional `Hello.capabilities` and `Key.keypad`.
+Revision **3** adds `TerminalCapabilities.clipboard_write` and retires
+`ClipboardRequest`/`ClipboardReply` (ADR 0020; see Clipboard below).
 Older peers remain supported: absent fields have their original meanings,
 and a revision number greater than 1 does not require these additions.
 
@@ -79,22 +81,26 @@ timeouts fall back to legacy input; `LEM_RATATUI_KEYBOARD=legacy` skips
 negotiation. Crossterm is the sole input reader and retains keys typed
 during negotiation. The protocol pipes never carry terminal queries.
 
-`Hello.capabilities` contains the confirmed keyboard features:
+`Hello.capabilities` contains the confirmed keyboard features, and one
+that is not negotiated but decided by the terminal's identity:
 
 | Field | Meaning |
 |---|---|
 | `keyboard_disambiguation` | Escape-code disambiguation is active. |
 | `alternate_key_reporting` | Alternate-key reporting is active. |
 | `keypad_identity` | The input protocol can report keypad provenance; individual terminals and lock states may still lose it. |
+| `clipboard_write` | The terminal takes OSC 52, by its identity (`support::osc52`) or `LEM_RATATUI_OSC52`; never true without a terminal. |
 
 An absent message means unknown capabilities or an older display; a
-present message with every flag false means a known legacy session. The
+present message with every keyboard flag false means a known legacy
+keyboard session. The
 relay records this before it starts the editor. User configuration can
 read `lem-display-relay/relay:relay-terminal-capabilities` on `(lem:implementation)`:
 it returns `NIL` for unknown, or an immutable `terminal-capabilities`
 instance with readers `terminal-capabilities-keyboard-disambiguation`,
-`terminal-capabilities-alternate-key-reporting` and
-`terminal-capabilities-keypad-identity` in the same package.
+`terminal-capabilities-alternate-key-reporting`,
+`terminal-capabilities-keypad-identity` and
+`terminal-capabilities-clipboard-write` in the same package.
 `M-x describe-terminal-capabilities` displays that state on demand.
 These capabilities describe reporting support; the provenance on each
 key event is authoritative regardless of what the handshake advertised.

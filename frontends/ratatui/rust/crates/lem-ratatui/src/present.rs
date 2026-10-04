@@ -545,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn copying_between_frames_leaves_the_next_frame_whole() {
+    fn copying_does_not_disturb_the_frame_diff() {
         let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
         let frame = frame_with("abcd", underlined(UnderlineStyle::Curly));
         written(&mut presenter, &frame);
