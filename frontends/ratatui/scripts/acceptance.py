@@ -271,6 +271,25 @@ check(16, "with no agent, a copy reaches the terminal as OSC 52, and only when i
       f"sent when on: {want in sent['1']}; sent when off: {chr(27) + ']52;' in sent['0']}; "
       f"copied both times: {sorted(saved.values())}")
 
+# --- 17: a stuck Lem can be asked for its backtraces -------------------
+# SIGUSR1 makes Lem write every thread's backtrace to its own session's
+# log, so a stall can be looked at while it happens, without a debugger.
+# XDG_STATE_HOME is a scratch directory so that log can be found.
+import glob
+state = tempfile.mkdtemp(prefix="lem-accept-state-")
+s = Session(env={"XDG_STATE_HOME": state}); s.pump(8)
+lem = s.lem_pid()
+if lem: os.kill(lem, signal.SIGUSR1)
+s.pump(3)
+logs = glob.glob(os.path.join(state, "lem-ratatui", "lem-*.log"))
+text = open(logs[0]).read() if len(logs) == 1 else ""
+s.send([b"\x18", b"\x03"]); status = s.wait(8); s.kill()
+shutil.rmtree(state, ignore_errors=True)
+editor = "=== thread editor ===" in text and "\n0: " in text
+check(17, "SIGUSR1 writes every thread's backtrace to the session's own log",
+      lem is not None and len(logs) == 1 and editor and status == 0,
+      f"logs={[os.path.basename(l) for l in logs]}, editor backtrace={editor}, status={status}")
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")
