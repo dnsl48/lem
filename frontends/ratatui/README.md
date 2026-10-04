@@ -267,10 +267,14 @@ for trying it without a desktop; acceptance check 14 does.
 
 Two caveats, neither ours to fix:
 
-- On X11 the clipboard is served by the process that owns it. When the
-  session ends the agent hands it to a clipboard manager if one is
-  running; without one, text copied out of Lem is gone once Lem exits.
-  That is how X11 works.
+- The clipboard is served by the process that owns it, here the agent.
+  On Wayland the agent uses the data-control protocol where the
+  compositor offers it (sway and other wlroots compositors, KDE), and
+  X11 otherwise — through XWayland, whose clipboard not every compositor
+  passes on to Wayland applications. When the session ends, text copied
+  out of Lem survives only in a clipboard manager: on X11 the agent hands
+  it over to one if it is running; on Wayland a manager must keep its
+  own copy (`wl-paste --watch cliphist store`, clipman and the like).
 - With no display server — SSH without forwarding, a container — the
   agent logs a line and reports no clipboard, rather than erroring.
 

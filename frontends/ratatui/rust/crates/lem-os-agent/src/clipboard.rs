@@ -12,7 +12,9 @@ pub trait Clipboard: Send {
     fn set(&mut self, text: &str);
 }
 
-/// The desktop's clipboard, through `arboard` (X11).
+/// The desktop's clipboard, through `arboard`: Wayland's, by the
+/// data-control protocol, where the compositor offers it (sway and other
+/// wlroots compositors, KDE); X11's otherwise.
 struct System(arboard::Clipboard);
 
 impl Clipboard for System {
