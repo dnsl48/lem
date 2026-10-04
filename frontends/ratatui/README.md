@@ -243,31 +243,32 @@ Wide characters work — Lem's startup modeline contains U+1F512, and
 
 ## Clipboard
 
-`M-w` and `C-y` use the desktop's clipboard through the OS agent when it
-has one, and otherwise the display's, both through `arboard`. Each side
-waits only 0.1s for a paste to be answered — the display's deadline is
-the relay's `*clipboard-timeout*`, the agent's is
-`lem-os-agent:*request-timeout*`, kept as two separate variables on
-purpose (ADR 0019's ruling R11: the agent must not depend on the relay,
-and will carry requests of its own later) — so the read happens inline
-rather than on a thread. Without X forwarding the display has no
-clipboard either, same as the agent: copy and paste then stay inside
-Lem's own kill ring rather than reaching the desktop (OSC 52, which
-would not need a display server, is a follow-up).
+`M-w` and `C-y` use the desktop's clipboard through the OS agent, the one
+process that touches the system clipboard (ADR 0020). Lem waits only
+0.1s (`lem-os-agent:*request-timeout*`) for a paste to be answered, so
+the read happens inline rather than on a thread.
+
+When the agent has no clipboard — over SSH, in a container, or with no
+agent — copying goes to the terminal instead, with OSC 52, in terminals
+known to take it: kitty, WezTerm, foot, Alacritty, Ghostty, Contour,
+iTerm2 and Windows Terminal. Over SSH that is the clipboard on your own
+machine. `LEM_RATATUI_OSC52=1` or `0` settles it for any other terminal
+(tmux with `set-clipboard on`, say); `M-x describe-terminal-capabilities`
+shows what was decided. The display cannot read the terminal's
+clipboard, so `C-y` then yanks Lem's own kill ring; paste from your
+machine with the terminal's own paste.
 
 `LEM_OS_AGENT_CLIPBOARD_FILE=PATH` makes a file the agent's clipboard,
 for trying it without a desktop; acceptance check 14 does.
 
 Two caveats, neither ours to fix:
 
-- On X11 the clipboard is served by the process that owns it, so text
-  copied out of Lem is gone once Lem exits. That is how X11 works.
-- With no display server — SSH without forwarding, a container —
-  initialisation fails, a line is logged, and copy and paste do nothing
-  rather than erroring.
-
-`cargo run -p lem-ratatui --example clip -- get|hold TEXT` is a helper for
-testing either direction.
+- On X11 the clipboard is served by the process that owns it. When the
+  session ends the agent hands it to a clipboard manager if one is
+  running; without one, text copied out of Lem is gone once Lem exits.
+  That is how X11 works.
+- With no display server — SSH without forwarding, a container — the
+  agent logs a line and reports no clipboard, rather than erroring.
 
 ## Performance
 
@@ -320,7 +321,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 15 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 16 checks
 ```
 
 ## Next steps

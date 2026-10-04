@@ -37,6 +37,21 @@ pub fn hyperlinks(env: impl Fn(&str) -> Option<String>) -> bool {
             || env("WT_SESSION").is_some())
 }
 
+/// Whether the terminal puts text on its clipboard when asked with OSC 52
+/// (ADR 0020): the clipboard where the user is, even over SSH.
+///
+/// Where it is not known to, nothing is written and copying stays inside
+/// Lem. VTE (GNOME Terminal and friends) has no OSC 52; xterm and Konsole
+/// depend on their settings, and tmux passes it on only with
+/// `set-clipboard on`. `LEM_RATATUI_OSC52` (`1` or `0`) settles it either
+/// way.
+pub fn osc52(env: impl Fn(&str) -> Option<String>) -> bool {
+    if let Some(forced) = forced(&env, "LEM_RATATUI_OSC52") {
+        return forced;
+    }
+    !multiplexed(&env) && (modern(&env) || env("WT_SESSION").is_some())
+}
+
 /// An override's answer, when the variable is set.
 fn forced(env: &impl Fn(&str) -> Option<String>, name: &str) -> Option<bool> {
     env(name).map(|value| matches!(value.as_str(), "1" | "true" | "yes"))
@@ -91,6 +106,55 @@ mod tests {
 
     fn links(vars: &[(&str, &str)]) -> bool {
         hyperlinks(env(vars))
+    }
+
+    fn clipboard(vars: &[(&str, &str)]) -> bool {
+        osc52(env(vars))
+    }
+
+    #[test]
+    fn terminals_known_to_take_osc52() {
+        assert!(clipboard(&[("TERM", "xterm-kitty")]));
+        assert!(clipboard(&[("TERM", "foot")]));
+        assert!(clipboard(&[("TERM", "alacritty")]));
+        assert!(clipboard(&[
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "WezTerm")
+        ]));
+        assert!(clipboard(&[
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "iTerm.app")
+        ]));
+        assert!(clipboard(&[
+            ("TERM", "xterm-256color"),
+            ("WT_SESSION", "x")
+        ]));
+    }
+
+    #[test]
+    fn osc52_elsewhere_only_when_told() {
+        assert!(!clipboard(&[("TERM", "xterm-256color")]));
+        assert!(
+            !clipboard(&[("TERM", "xterm-256color"), ("VTE_VERSION", "7600")]),
+            "VTE has no OSC 52"
+        );
+        assert!(
+            !clipboard(&[("TERM", "xterm-256color"), ("KONSOLE_VERSION", "240202")]),
+            "Konsole depends on its settings"
+        );
+        assert!(!clipboard(&[("TERM", "tmux-256color")]));
+        assert!(!clipboard(&[
+            ("TERM", "xterm-kitty"),
+            ("TMUX", "/tmp/tmux-1000/default,1,0")
+        ]));
+        assert!(clipboard(&[
+            ("TERM", "tmux-256color"),
+            ("LEM_RATATUI_OSC52", "1")
+        ]));
+        assert!(!clipboard(&[
+            ("TERM", "xterm-kitty"),
+            ("LEM_RATATUI_OSC52", "0")
+        ]));
     }
 
     #[test]

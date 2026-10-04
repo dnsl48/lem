@@ -241,6 +241,29 @@ check(15, "without an OS agent the editor runs, and the launcher says why",
       "Welcome to Lem" in started and told and status == 0,
       f"started={'Welcome to Lem' in started}, warned={told}, status={status}")
 
+# --- 16: copying with OSC 52 when there is no agent (ADR 0020) ----------
+# With no agent to own the clipboard, a copy goes to the terminal as OSC 52
+# when the terminal takes it, and nowhere when it does not. Forced both ways,
+# since the pty's TERM names no terminal that is known to.
+import base64
+want = "\x1b]52;c;" + base64.b64encode(b"copied").decode()
+sent = {}
+for forced in ("1", "0"):
+    path = f"/tmp/lem-accept-osc52-{forced}.txt"
+    if os.path.exists(path): os.remove(path)
+    s = Session(env={"LEM_RATATUI_OS_AGENT": "/nonexistent/lem-os-agent",
+                     "LEM_RATATUI_OSC52": forced}); s.pump(8)
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)                              # C-x C-f
+    s.send(path); s.send([b"\r"]); s.pump(2)
+    s.send("copied", delay=0.15); s.pump(0.6)
+    m = s.mark()
+    s.send([b"\x01", b"\x00", b"\x05", b"\x1bw"], delay=0.25); s.pump(1)  # C-a C-SPC C-e M-w
+    sent[forced] = s.since(m)
+    s.kill()
+check(16, "with no agent, a copy reaches the terminal as OSC 52, and only when it takes it",
+      want in sent["1"] and "\x1b]52;" not in sent["0"],
+      f"sent when on: {want in sent['1']}; sent when off: {chr(27) + ']52;' in sent['0']}")
+
 print()
 failed = [r for r in results if not r[2]]
 print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")

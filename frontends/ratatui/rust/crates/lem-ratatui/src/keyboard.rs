@@ -65,6 +65,8 @@ fn negotiate_with(
                 // The protocol can encode provenance, but each
                 // event's keypad bit remains authoritative.
                 keypad_identity: true,
+                // The clipboard is not the keyboard's; main.rs sets it.
+                ..TerminalCapabilities::default()
             };
         }
     }

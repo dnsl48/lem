@@ -67,6 +67,7 @@ fn session() -> Vec<(u64, to_editor::Message)> {
                     keyboard_disambiguation: true,
                     alternate_key_reporting: true,
                     keypad_identity: true,
+                    clipboard_write: true,
                 }),
             }),
         ),
@@ -122,13 +123,8 @@ fn session() -> Vec<(u64, to_editor::Message)> {
                 height: 40,
             }),
         ),
-        (
-            2_200_000,
-            to_editor::Message::ClipboardReply(v1::ClipboardReply {
-                reply_to: 7,
-                text: Some("from the display".into()),
-            }),
-        ),
+        // All the display answers a ClipboardRequest with since ADR 0020;
+        // the relay ignores it.
         (
             2_300_000,
             to_editor::Message::ClipboardReply(v1::ClipboardReply {

@@ -165,38 +165,29 @@ editors have run in one process, as tests do, the two can be different
     (ok (typep (lem-if:get-foreground-color relay) 'lem:color))
     (ok (typep (lem-if:get-background-color relay) 'lem:color))))
 
-;;; Clipboard
+;;; Clipboard (ADR 0020)
 
-(defun replying-relay (reply)
-  "A relay whose display answers clipboard requests with REPLY, or not at
-all when REPLY is NIL. Its sink numbers messages as a codec does."
-  (let ((relay (make-instance 'test-relay))
-        (seq 0))
-    (setf (relay-sink relay)
-          (lambda (message)
-            (push message *sent*)
-            (incf seq)
-            (when (and reply (typep message 'clipboard-request))
-              (clipboard-replied relay seq reply))
-            seq))
+(defun clipboard-relay (capabilities)
+  "A relay whose display announced CAPABILITIES (NIL: an older display that
+announced none), recording what it is sent."
+  (let ((relay (make-instance 'test-relay :terminal-capabilities capabilities)))
+    (setf (relay-sink relay) (lambda (message) (push message *sent*) (length *sent*)))
     relay))
 
-(deftest pasting-asks-the-display
+(deftest copying-reaches-a-display-that-writes-the-clipboard
   (let ((*sent* '()))
-    (ok (equal "from the display" (lem-if:clipboard-paste (replying-relay "from the display"))))))
-
-(deftest pasting-gives-up-when-the-display-does-not-answer
-  (let ((*sent* '()))
-    (ok (null (lem-if:clipboard-paste (replying-relay nil))))))
-
-(deftest a-late-reply-is-not-taken-for-the-next-paste
-  (let ((*sent* '())
-        (relay (replying-relay "fresh")))
-    (clipboard-replied relay 999 "stale")
-    (ok (equal "fresh" (lem-if:clipboard-paste relay)))))
-
-(deftest copying-puts-text-on-the-display-clipboard
-  (let ((*sent* '())
-        (relay (replying-relay nil)))
-    (lem-if:clipboard-copy relay "copied")
+    (lem-if:clipboard-copy
+     (clipboard-relay (make-terminal-capabilities :clipboard-write t)) "copied")
     (ok (equal "copied" (set-clipboard-text (first *sent*))))))
+
+(deftest copying-sends-nothing-to-a-display-that-cannot
+  (dolist (capabilities (list nil (make-terminal-capabilities)))
+    (let ((*sent* '()))
+      (lem-if:clipboard-copy (clipboard-relay capabilities) "copied")
+      (ok (null *sent*) (format nil "~S" capabilities)))))
+
+(deftest pasting-asks-the-display-nothing
+  (let ((*sent* '()))
+    (ok (null (lem-if:clipboard-paste
+               (clipboard-relay (make-terminal-capabilities :clipboard-write t)))))
+    (ok (null *sent*) "the display has no clipboard to read")))

@@ -12,7 +12,7 @@ pub trait Clipboard: Send {
     fn set(&mut self, text: &str);
 }
 
-/// The desktop's clipboard, through `arboard` (X11; as the display's).
+/// The desktop's clipboard, through `arboard` (X11).
 struct System(arboard::Clipboard);
 
 impl Clipboard for System {

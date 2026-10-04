@@ -230,19 +230,6 @@ dequeues first, so ignoring the error still discards the event."
                            (deliver (make-instance 'input-relay)
                                     (make-paste-input "pasted")))))))
 
-(deftest a-clipboard-reply-answers-the-waiting-paste
-  (let ((relay (make-instance 'input-relay)))
-    ;; The request goes out as message 8; the reply names it.
-    (setf (relay-sink relay) (lambda (message) (declare (ignore message)) 8))
-    (deliver relay (make-clipboard-reply "from the display" :reply-to 8))
-    (ok (equal "from the display" (lem-if:clipboard-paste relay)))))
-
-(deftest a-reply-to-another-request-is-not-taken
-  (let ((relay (make-instance 'input-relay)))
-    (setf (relay-sink relay) (lambda (message) (declare (ignore message)) 8))
-    (deliver relay (make-clipboard-reply "stale" :reply-to 5))
-    (ok (null (lem-if:clipboard-paste relay)))))
-
 (deftest delivering-an-input-records-its-seq
   (drain)
   (let ((relay (make-instance 'input-relay)))

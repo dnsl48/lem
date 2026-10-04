@@ -155,9 +155,6 @@
     (ok (equal "copied" (pb:set-clipboard.text
                          (pb:to-display.set-clipboard
                           (to-display (codec:encode (relay::make-set-clipboard "copied") state 1))))))
-    (ok (eq 'pb:clipboard-request
-            (pb:to-display.message-case
-             (to-display (codec:encode (relay:make-clipboard-request) state 2)))))
     (let ((welcome (pb:to-display.welcome (to-display (codec:welcome 3 "session-x")))))
       (ok (= codec:+protocol-version+ (pb:welcome.protocol-version welcome)))
       (ok (equal "session-x" (pb:welcome.session-id welcome))))
@@ -215,12 +212,11 @@
     (ok (eq :right (lem-display-relay/input::mouse-input-button drag)) "a drag does")
     (ok (= -1 (lem-display-relay/input::mouse-input-wheel-y wheel)))))
 
-(deftest a-clipboard-reply-may-have-no-text
-  (let ((with (decoded-input :clipboard-reply (pb:make-clipboard-reply :reply-to 4 :text "hi")))
-        (without (decoded-input :clipboard-reply (pb:make-clipboard-reply :reply-to 5))))
-    (ok (equal "hi" (lem-display-relay/input::clipboard-reply-text with)))
-    (ok (= 4 (lem-display-relay/input::clipboard-reply-reply-to with)))
-    (ok (null (lem-display-relay/input::clipboard-reply-text without)))))
+(deftest a-clipboard-reply-is-ignored
+  (ok (equal '(:ignored)
+             (codec:decode (to-editor :clipboard-reply
+                                      (pb:make-clipboard-reply :reply-to 4 :text "hi"))))
+      "the relay asks no display for its clipboard (ADR 0020)"))
 
 (deftest a-hello-decodes
   (ok (equal '(:hello 1 1 "s" 100 30 nil #x101010 nil)
@@ -238,14 +234,16 @@
           (enhanced (capabilities :capabilities
                                    (pb:make-terminal-capabilities
                                     :keyboard-disambiguation t :alternate-key-reporting t
-                                    :keypad-identity t))))
+                                    :keypad-identity t :clipboard-write t))))
       (ok (typep legacy 'relay:terminal-capabilities))
       (ng (relay:terminal-capabilities-keyboard-disambiguation legacy))
       (ng (relay:terminal-capabilities-alternate-key-reporting legacy))
       (ng (relay:terminal-capabilities-keypad-identity legacy))
+      (ng (relay:terminal-capabilities-clipboard-write legacy))
       (ok (relay:terminal-capabilities-keyboard-disambiguation enhanced))
       (ok (relay:terminal-capabilities-alternate-key-reporting enhanced))
-      (ok (relay:terminal-capabilities-keypad-identity enhanced)))))
+      (ok (relay:terminal-capabilities-keypad-identity enhanced))
+      (ok (relay:terminal-capabilities-clipboard-write enhanced)))))
 
 (deftest unknown-fields-do-not-change-a-known-message
   (let* ((body (to-editor :seq 3 :hello (pb:make-hello
