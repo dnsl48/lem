@@ -246,8 +246,8 @@ check(15, "without an OS agent the editor runs, and the launcher says why",
 # when the terminal takes it, and nowhere when it does not. Forced both ways,
 # since the pty's TERM names no terminal that is known to.
 import base64
-want = "\x1b]52;c;" + base64.b64encode(b"copied").decode()
-sent = {}
+want = "\x1b]52;c;" + base64.b64encode(b"copied").decode() + "\x1b\\"
+sent, saved = {}, {}
 for forced in ("1", "0"):
     path = f"/tmp/lem-accept-osc52-{forced}.txt"
     if os.path.exists(path): os.remove(path)
@@ -259,10 +259,17 @@ for forced in ("1", "0"):
     m = s.mark()
     s.send([b"\x01", b"\x00", b"\x05", b"\x1bw"], delay=0.25); s.pump(1)  # C-a C-SPC C-e M-w
     sent[forced] = s.since(m)
+    # The copy happened either way: it is in the kill ring, so C-y doubles
+    # the line. Without this, "no OSC 52 when off" could pass vacuously.
+    s.send([b"\x05", b"\x19"], delay=0.2); s.pump(0.8)                   # C-e C-y
+    s.send([b"\x18", b"\x13"]); s.pump(2)                                # C-x C-s
+    saved[forced] = open(path).read() if os.path.exists(path) else "<no file>"
     s.kill()
 check(16, "with no agent, a copy reaches the terminal as OSC 52, and only when it takes it",
-      want in sent["1"] and "\x1b]52;" not in sent["0"],
-      f"sent when on: {want in sent['1']}; sent when off: {chr(27) + ']52;' in sent['0']}")
+      want in sent["1"] and "\x1b]52;" not in sent["0"]
+      and all(text.startswith("copiedcopied") for text in saved.values()),
+      f"sent when on: {want in sent['1']}; sent when off: {chr(27) + ']52;' in sent['0']}; "
+      f"copied both times: {sorted(saved.values())}")
 
 print()
 failed = [r for r in results if not r[2]]

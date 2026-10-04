@@ -35,7 +35,9 @@ OSC 52 (ADR 0020)." text)
 (defstruct (terminal-capabilities (:copier nil))
   "The display's confirmed terminal features — its keyboard, and whether
 it writes the clipboard with OSC 52 — immutable for this Hello.
-An instance with all flags NIL is a known legacy session; a missing
+An instance with all keyboard flags NIL is a known legacy keyboard
+session (CLIPBOARD-WRITE is decided by the terminal's identity, not
+negotiated); a missing
 instance means an older peer or unknown capabilities. Keypad identity
 means the protocol can report provenance, not that every key/lock state
 is distinguishable. Each key event remains authoritative."
