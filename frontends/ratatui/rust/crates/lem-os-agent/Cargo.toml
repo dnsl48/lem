@@ -11,7 +11,10 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-arboard = { version = "3.6.1", default-features = false }
+# Wayland through the data-control protocol (wlroots compositors such as
+# sway, KDE), X11 otherwise: an X11-only clipboard is not bridged to
+# Wayland applications by every compositor.
+arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 lem-protocols = { path = "../lem-protocols" }
 prost = "0.14"
 
