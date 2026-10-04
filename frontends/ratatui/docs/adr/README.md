@@ -36,7 +36,8 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | [0016](0016-underline-styles.md) | Underline styles, and our own terminal output | Accepted; revised by 0017 |
 | [0017](0017-font-styles-and-links-in-lem-attributes.md) | Font styles and links in Lem's attributes (a core patch) | Accepted; supersedes 0015 |
 | [0018](0018-hyperlinks.md) | Web addresses as terminal hyperlinks | Accepted |
-| [0019](0019-an-os-agent-and-a-link-per-peer.md) | An OS agent, and a link per peer rather than a bus | Accepted |
+| [0019](0019-an-os-agent-and-a-link-per-peer.md) | An OS agent, and a link per peer rather than a bus | Accepted; clipboard split revised by 0020 |
+| [0020](0020-the-clipboard-belongs-to-the-agent.md) | The clipboard belongs to the agent; the display offers OSC 52 | Accepted |
 
 ## Adding one
 
