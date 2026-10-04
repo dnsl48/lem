@@ -173,11 +173,16 @@ consumes:
 
 ## Clipboard
 
-When Lem yanks, the relay sends `ClipboardRequest` and waits 0.1 s for the
-`ClipboardReply` that names it by `reply_to`. A late reply to an earlier
-request is discarded, not taken for the current one. `text` is absent,
-rather than empty, when the display has no clipboard to read. Copying is
-a one-way `SetClipboard`.
+The system clipboard is the OS agent's (ADR 0020); the display only
+writes the terminal's, with OSC 52, and cannot read it.
+
+- Copying is a one-way `SetClipboard`, sent only to a display whose
+  `Hello` announced `TerminalCapabilities.clipboard_write`. The display
+  writes it as `ESC ] 52 ; c ; <base64> ESC \`, between frames.
+- The relay never asks for the display's clipboard. `ClipboardRequest`
+  and `ClipboardReply` are unused since revision 3; a display asked
+  anyway answers at once with no `text`, and a `ClipboardReply` reaching
+  the relay is ignored.
 
 ## Ending
 

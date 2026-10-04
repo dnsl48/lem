@@ -4,8 +4,7 @@
                     (:proto :cl-protobufs))
   (:import-from :lem-display-relay/relay
    :set-clipboard
-   :set-clipboard-text
-   :clipboard-request)
+   :set-clipboard-text)
   (:import-from :lem-ipc-channels :now-microseconds)
   (:export :+protocol-version+
            :codec-state
@@ -18,7 +17,7 @@
            :key-name))
 (in-package :lem-display-relay/protobuf/codec)
 
-(defconstant +protocol-version+ 2
+(defconstant +protocol-version+ 3
   "The revision of lem.display.v1 this codec speaks (display.proto, `Hello').")
 
 (defparameter *named-keys*
@@ -201,9 +200,7 @@ anything else, now."
     (frame (envelope seq (frame-time message) :frame (pb-frame message state)))
     (set-clipboard
      (envelope seq (now-microseconds)
-               :set-clipboard (pb:make-set-clipboard :text (set-clipboard-text message))))
-    (clipboard-request
-     (envelope seq (now-microseconds) :clipboard-request (pb:make-clipboard-request)))))
+               :set-clipboard (pb:make-set-clipboard :text (set-clipboard-text message))))))
 
 (defun welcome (seq session-id)
   "A serialised `Welcome' numbered SEQ, echoing SESSION-ID."
@@ -242,7 +239,8 @@ anything else, now."
       (lem-display-relay/relay:make-terminal-capabilities
        :keyboard-disambiguation (pb:terminal-capabilities.keyboard-disambiguation capabilities)
        :alternate-key-reporting (pb:terminal-capabilities.alternate-key-reporting capabilities)
-       :keypad-identity (pb:terminal-capabilities.keypad-identity capabilities)))))
+       :keypad-identity (pb:terminal-capabilities.keypad-identity capabilities)
+       :clipboard-write (pb:terminal-capabilities.clipboard-write capabilities)))))
 
 (defun button (value)
   (ecase value
@@ -276,7 +274,7 @@ anything else, now."
 
   (:hello SEQ PROTOCOL-VERSION SESSION-ID WIDTH HEIGHT FOREGROUND BACKGROUND CAPABILITIES)
   (:input INPUT)
-  (:ignored)          ; a message this revision does not know"
+  (:ignored)          ; a ClipboardReply, or a message this revision does not know"
   (let* ((message (proto:deserialize-from-bytes 'pb:to-editor body))
          (seq (pb:to-editor.seq message))
          (time (pb:to-editor.time-us message)))
@@ -304,10 +302,6 @@ anything else, now."
        (let ((resize (pb:to-editor.resize message)))
          (list :input (make-resize-input (pb:resize.width resize) (pb:resize.height resize)
                                          :time time :seq seq))))
-      (pb:clipboard-reply
-       (let ((reply (pb:to-editor.clipboard-reply message)))
-         (list :input (make-clipboard-reply (and (pb:clipboard-reply.has-text reply)
-                                                 (pb:clipboard-reply.text reply))
-                                            :reply-to (pb:clipboard-reply.reply-to reply)
-                                            :time time :seq seq))))
+      ;; The relay asks no display for its clipboard (ADR 0020); a reply
+      ;; is ignored along with anything this revision does not know.
       (t (list :ignored)))))

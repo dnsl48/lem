@@ -1,7 +1,6 @@
 (defpackage :lem-display-relay/relay
   (:use :cl :lem-display-relay/frame :lem-display-relay/view)
-  (:local-nicknames (:draw :lem-display-relay/draw)
-                    (:ipc :lem-ipc-channels))
+  (:local-nicknames (:draw :lem-display-relay/draw))
   (:export :relay
            :relay-session
            :relay-sink
@@ -15,6 +14,7 @@
            :terminal-capabilities-keyboard-disambiguation
            :terminal-capabilities-alternate-key-reporting
            :terminal-capabilities-keypad-identity
+           :terminal-capabilities-clipboard-write
            :describe-terminal-capabilities
            :relay-editor-thread
            :relay-last-press
@@ -23,36 +23,28 @@
            :set-display-size
            :set-clipboard
            :set-clipboard-text
-           :clipboard-request
-           :make-clipboard-request
-           :clipboard-replied
            :relay-input-seq))
 (in-package :lem-display-relay/relay)
-
-(defparameter *clipboard-timeout* 0.1
-  "Seconds `lem-if:clipboard-paste' waits for the display's clipboard, as
-`lem-server' does. Lem asks on every yank, so a display without a
-clipboard must not stall the editor.")
 
 ;;; Messages sent outside frames (ADR 0011: envelopes, not ops).
 
 (defstruct (set-clipboard (:constructor make-set-clipboard (text)))
-  "Put TEXT on the display's clipboard." text)
-
-(defstruct (clipboard-request (:constructor make-clipboard-request ()))
-  "Ask the display for its clipboard. The answer names this request by
-its `seq', as `reply_to' (ADR 0013), and arrives as a
-`clipboard-replied' call.")
+  "Put TEXT on the terminal's clipboard, which the display writes with
+OSC 52 (ADR 0020)." text)
 
 (defstruct (terminal-capabilities (:copier nil))
-  "The display's confirmed keyboard features, immutable for this Hello.
+  "The display's confirmed terminal features — its keyboard, and whether
+it writes the clipboard with OSC 52 — immutable for this Hello.
 An instance with all flags NIL is a known legacy session; a missing
 instance means an older peer or unknown capabilities. Keypad identity
 means the protocol can report provenance, not that every key/lock state
 is distinguishable. Each key event remains authoritative."
   (keyboard-disambiguation nil :type boolean :read-only t)
   (alternate-key-reporting nil :type boolean :read-only t)
-  (keypad-identity nil :type boolean :read-only t))
+  (keypad-identity nil :type boolean :read-only t)
+  ;; The terminal takes OSC 52, so copying can reach the clipboard where the
+  ;; user is, even over SSH (ADR 0020).
+  (clipboard-write nil :type boolean :read-only t))
 
 ;;; The relay
 
@@ -115,9 +107,7 @@ painter's order, so this is the stacking order (ADR 0012).")
     :initform nil
     :accessor relay-input-seq
     :documentation "The `seq' of the last display message handed to Lem,
-recorded by `lem-display-relay/input:deliver'; each frame carries it.")
-   (clipboard-replies :initform (ipc:make-replies)
-                      :reader relay-clipboard-replies))
+recorded by `lem-display-relay/input:deliver'; each frame carries it."))
   (:documentation "The relay's half of a Lem implementation: every `lem-if'
 drawing method, building frames with a `session'.
 
@@ -127,7 +117,7 @@ The concrete class combines it with `lem:implementation', and a codec
 gives it a sink and an event loop (`lem-if:invoke')."))
 
 (lem:define-command describe-terminal-capabilities () ()
-  "Show the display's confirmed keyboard capabilities for this session.
+  "Show the display's confirmed keyboard and clipboard capabilities for this session.
 Unknown means the display did not advertise capabilities. A legacy
 session advertises all features as unavailable; keypad provenance still
 comes from individual key events. This command never runs at startup."
@@ -136,11 +126,12 @@ comes from individual key events. This command never runs at startup."
                             (relay-terminal-capabilities implementation))))
     (lem:display-popup-message
      (if capabilities
-         (format nil "Terminal keyboard capabilities~%~%Disambiguation: ~:[no~;yes~]~%Alternate keys: ~:[no~;yes~]~%Keypad identity: ~:[no~;yes~]~%~%Keypad identity describes protocol support; each key event is authoritative."
+         (format nil "Terminal capabilities~%~%Disambiguation: ~:[no~;yes~]~%Alternate keys: ~:[no~;yes~]~%Keypad identity: ~:[no~;yes~]~%Clipboard (OSC 52): ~:[no~;yes~]~%~%Keypad identity describes protocol support; each key event is authoritative."
                  (terminal-capabilities-keyboard-disambiguation capabilities)
                  (terminal-capabilities-alternate-key-reporting capabilities)
-                 (terminal-capabilities-keypad-identity capabilities))
-         "Terminal keyboard capabilities: unknown (not advertised by this display)."))))
+                 (terminal-capabilities-keypad-identity capabilities)
+                 (terminal-capabilities-clipboard-write capabilities))
+         "Terminal capabilities: unknown (not advertised by this display)."))))
 
 (defun send (relay message)
   "Hand MESSAGE to the sink; return the `seq' it was sent as, or NIL when
@@ -303,23 +294,13 @@ there is no sink."
 ;;; Clipboard
 
 (defmethod lem-if:clipboard-copy ((relay relay) text)
-  (send relay (make-set-clipboard text)))
+  ;; Only to a display that writes the terminal's clipboard (OSC 52): any
+  ;; other has nowhere to put it (ADR 0020).
+  (alexandria:when-let ((capabilities (relay-terminal-capabilities relay)))
+    (when (terminal-capabilities-clipboard-write capabilities)
+      (send relay (make-set-clipboard text)))))
 
 (defmethod lem-if:clipboard-paste ((relay relay))
-  (alexandria:when-let ((seq (send relay (make-clipboard-request))))
-    (await-clipboard relay seq)))
-
-(defun await-clipboard (relay id)
-  "The text replied to the request sent as ID, or NIL after
-`*clipboard-timeout*'. A late reply to an earlier request is discarded,
-not mistaken for this one's."
-  (values (ipc:await-reply (relay-clipboard-replies relay) id *clipboard-timeout*)))
-
-(defun clipboard-replied (relay reply-to text)
-  "Hand the display's clipboard TEXT, answering the request sent as
-REPLY-TO, to the `lem-if:clipboard-paste' waiting for it.
-
-Called from the thread reading the display, never the editor's: the
-editor thread is blocked in `lem-if:clipboard-paste' waiting for exactly
-this, so the reply cannot go through `lem:send-event' (ADR 0012)."
-  (ipc:deliver-reply (relay-clipboard-replies relay) reply-to text))
+  ;; The display has no clipboard to read (ADR 0020): Lem yanks from its
+  ;; own kill ring, and the terminal's own paste arrives as `Paste'.
+  nil)

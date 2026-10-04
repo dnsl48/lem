@@ -19,8 +19,6 @@
            :make-mouse-input
            :resize-input
            :make-resize-input
-           :clipboard-reply
-           :make-clipboard-reply
            :key-event
            :*click-interval*
            :count-click
@@ -112,12 +110,6 @@ the relay counts (`count-click')."
                          (:constructor make-resize-input (width height &key time seq)))
   "The display is now WIDTH by HEIGHT cells." width height)
 
-(defstruct (clipboard-reply (:include input)
-                            (:constructor make-clipboard-reply
-                                (text &key reply-to time seq)))
-  "The display's clipboard TEXT, answering the request the relay sent as
-REPLY-TO." text reply-to)
-
 ;;; Delivery. Ported from lem-server's `input-callback'
 ;;; (frontends/server/main.lisp:792).
 
@@ -181,9 +173,8 @@ cell, within `*click-interval*'; otherwise one."
   (:documentation "Hand INPUT from the display to Lem.
 
 Called on the thread reading the display, never the editor's. Everything
-reaches the editor through its event queue, except the two that must
-not wait in it: abort, which interrupts the editor thread, and a
-clipboard reply, which the editor thread is blocked waiting for.")
+reaches the editor through its event queue, except abort, which must
+not wait in it: it interrupts the editor thread.")
   (:method ((relay relay) (input key-input))
     ;; C-] interrupts, as in ncurses and the browser client: the key for
     ;; an editor too busy to read its keys. C-g stays a key, so
@@ -231,8 +222,6 @@ clipboard reply, which the editor thread is blocked waiting for.")
   (:method ((relay relay) (input resize-input))
     (set-display-size relay (resize-input-width input) (resize-input-height input))
     (lem:send-event :resize))
-  (:method ((relay relay) (input clipboard-reply))
-    (clipboard-replied relay (clipboard-reply-reply-to input) (clipboard-reply-text input)))
   (:method :after ((relay relay) (input input))
     ;; What the next frame can reflect (ADR 0013). A plain assignment:
     ;; inputs are delivered in wire order, from the one reading thread.

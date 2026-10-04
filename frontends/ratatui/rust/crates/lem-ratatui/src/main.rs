@@ -6,7 +6,6 @@
 //! own cursor where Lem's is. Starting Lem and connecting the two is
 //! `lem-ratatui-launcher`'s job, not this one's.
 
-mod clipboard;
 mod colors;
 #[cfg(test)]
 mod golden;
@@ -72,6 +71,8 @@ fn main() -> Result<()> {
     let guard = term::Guard::new_if_interactive()?;
     let styled_underlines = support::styled_underlines(|name| std::env::var(name).ok());
     let hyperlinks = support::hyperlinks(|name| std::env::var(name).ok());
+    // Only with a terminal to write it to (ADR 0020).
+    let osc52 = guard.is_some() && support::osc52(|name| std::env::var(name).ok());
     let mut presenter = match &guard {
         Some(guard) => Some(
             Presenter::new(BufWriter::new(guard.writer()?), styled_underlines)
@@ -86,7 +87,6 @@ fn main() -> Result<()> {
     let (mut width, mut height) = display_size(guard.is_some());
 
     let (mut reader, mut writer) = transport::stdio(started);
-    let mut clipboard = clipboard::Clipboard::new();
     let mut screen = Screen::default();
 
     // The reader blocks, and the main loop must also watch the terminal,
@@ -121,12 +121,13 @@ fn main() -> Result<()> {
         height: u32::from(height),
         foreground: colors.foreground,
         background: colors.background,
-        capabilities: Some(
-            guard
+        capabilities: Some(v1::TerminalCapabilities {
+            clipboard_write: osc52,
+            ..guard
                 .as_ref()
                 .map(term::Guard::capabilities)
-                .unwrap_or_default(),
-        ),
+                .unwrap_or_default()
+        }),
     }))?;
 
     let mut frames = 0usize;
@@ -189,15 +190,19 @@ fn main() -> Result<()> {
                     screen.render_into(&mut layer);
                     presenter.present(&layer, screen.cursor_position(), screen.cursor_shape())?;
                 }
-                // The relay waits only 0.1s for this, so it is answered
-                // inline rather than handed to a thread.
+                // The display has no clipboard to read (ADR 0020); a relay
+                // that asks anyway is answered at once, with nothing.
                 Some(to_display::Message::ClipboardRequest(_)) => {
                     writer.send(to_editor::Message::ClipboardReply(v1::ClipboardReply {
                         reply_to: message.seq,
-                        text: clipboard.get(),
+                        text: None,
                     }))?;
                 }
-                Some(to_display::Message::SetClipboard(set)) => clipboard.set(&set.text),
+                Some(to_display::Message::SetClipboard(set)) => {
+                    if let Some(presenter) = presenter.as_mut().filter(|_| osc52) {
+                        presenter.set_clipboard(&set.text)?;
+                    }
+                }
                 Some(to_display::Message::Exit(exit)) => {
                     // Restore the terminal before saying why, so it can
                     // be read.

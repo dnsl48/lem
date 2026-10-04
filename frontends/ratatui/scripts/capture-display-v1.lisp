@@ -27,7 +27,11 @@
    :redraw-after-modifying-floating-window t
    :no-force-needed nil
    :window-left-margin 1
-   :window-bottom-margin 1))
+   :window-bottom-margin 1
+   ;; As a display that writes the clipboard with OSC 52, so the copy at
+   ;; the end of the session is sent (ADR 0020).
+   :terminal-capabilities (lem-display-relay/relay:make-terminal-capabilities
+                           :clipboard-write t)))
 
 (defparameter *fixtures*
   (asdf:system-relative-pathname "lem-display-relay" "../proto/fixtures/"))

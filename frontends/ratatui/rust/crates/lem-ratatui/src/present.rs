@@ -63,6 +63,18 @@ impl<W: Write> Presenter<W> {
         self
     }
 
+    /// Put `text` on the terminal's clipboard with OSC 52 (ADR 0020): the
+    /// clipboard where the user is, even over SSH. Written whole and
+    /// flushed between frames, so it never lands inside one. The caller
+    /// asks only when `support::osc52` says the terminal takes it.
+    pub fn set_clipboard(&mut self, text: &str) -> io::Result<()> {
+        use base64::Engine;
+
+        let encoded = base64::engine::general_purpose::STANDARD.encode(text);
+        write!(self.out, "\x1b]52;c;{encoded}\x1b\\")?;
+        self.out.flush()
+    }
+
     /// Put `frame` on the terminal, then the cursor: shown at `cursor`
     /// with `shape`, or hidden.
     pub fn present(
@@ -522,5 +534,23 @@ mod tests {
             .collect();
         assert!(!ids.is_empty(), "{out:?}");
         assert!(ids.iter().all(|id| *id == ids[0]), "{ids:?}");
+    }
+
+    #[test]
+    fn copying_writes_osc52_with_the_text_in_base64() {
+        let mut presenter = Presenter::new(Vec::new(), true);
+        presenter.set_clipboard("copied é").unwrap();
+        let out = String::from_utf8(presenter.out.clone()).unwrap();
+        assert_eq!(out, "\x1b]52;c;Y29waWVkIMOp\x1b\\");
+    }
+
+    #[test]
+    fn copying_between_frames_leaves_the_next_frame_whole() {
+        let mut presenter = Presenter::new(Vec::new(), true).with_hyperlinks(true);
+        let frame = frame_with("abcd", underlined(UnderlineStyle::Curly));
+        written(&mut presenter, &frame);
+        presenter.set_clipboard("x").unwrap();
+        let out = written(&mut presenter, &frame);
+        assert!(!out.contains("abcd"), "nothing to redraw: {out:?}");
     }
 }

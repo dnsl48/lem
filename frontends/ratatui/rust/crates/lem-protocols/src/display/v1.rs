@@ -13,7 +13,7 @@ mod generated {
 pub use generated::*;
 
 /// The revision of this schema this crate was built against (`Hello`).
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod tests {

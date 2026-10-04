@@ -11,6 +11,7 @@
 //   0015  font styles; 0016 underline styles
 //   0018  hyperlinks
 //   0019  named lem.display.v1, one package per link (was lem.relay.v1)
+//   0020  the clipboard is the OS agent's; the display offers OSC 52
 //
 // Transport: the launcher's pipes, stdio (ADR 0005). Each message is one
 // ToDisplay or ToEditor, framed with protobuf's standard length-delimited
@@ -102,6 +103,11 @@ message TerminalCapabilities {
   // state in every terminal is guaranteed distinguishable; Key.keypad is
   // authoritative for each event, irrespective of these capabilities.
   bool keypad_identity = 3;
+  // The terminal puts text on its clipboard when asked with OSC 52: the
+  // clipboard where the user is, even over SSH. Decided by the terminal's
+  // identity, or LEM_RATATUI_OSC52 (ADR 0020). The relay sends
+  // SetClipboard only when this is true. Added in revision 3.
+  bool clipboard_write = 4;
 }
 
 message Welcome {
@@ -315,8 +321,12 @@ message Run {
 }
 
 // ---------------------------------------------------------------------------
-// Clipboard. The relay asks for the display's clipboard when Lem yanks, and
-// waits briefly for the answer; the reply names the request by its seq.
+// Clipboard (ADR 0020). The OS agent owns the system clipboard; the display
+// only writes the terminal's, with OSC 52, and cannot read it.
+//
+// ClipboardRequest and ClipboardReply are unused since revision 3: the relay
+// no longer asks, and a display asked anyway answers with no text. They stay
+// so that no field is ever reused.
 
 message ClipboardRequest {}
 
@@ -327,6 +337,8 @@ message ClipboardReply {
   optional string text = 2;
 }
 
+// Put TEXT on the terminal's clipboard. Sent only to a display that
+// announced TerminalCapabilities.clipboard_write.
 message SetClipboard {
   string text = 1;
 }

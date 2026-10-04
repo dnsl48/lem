@@ -20,7 +20,8 @@
           :collect (codec:decode body))))
 
 (defun inputs ()
-  (mapcar #'second (remove :hello (fixture-requests) :key #'first)))
+  (mapcar #'second (remove-if-not (lambda (request) (eq :input (first request)))
+                                  (fixture-requests))))
 
 (defun lem-key (input)
   (let ((key (key-event input)))
@@ -32,11 +33,12 @@
 (deftest the-hello-carries-the-display
   (let* ((hello (first (fixture-requests)))
          (capabilities (car (last hello))))
-    (ok (equal '(:hello 1 2 "01920000-0000-7000-8000-000000000000" 100 30 nil #x101010)
+    (ok (equal '(:hello 1 3 "01920000-0000-7000-8000-000000000000" 100 30 nil #x101010)
                (butlast hello)))
     (ok (relay:terminal-capabilities-keyboard-disambiguation capabilities))
     (ok (relay:terminal-capabilities-alternate-key-reporting capabilities))
-    (ok (relay:terminal-capabilities-keypad-identity capabilities))))
+    (ok (relay:terminal-capabilities-keypad-identity capabilities))
+    (ok (relay:terminal-capabilities-clipboard-write capabilities))))
 
 (deftest keys-reach-lem-by-lems-names
   (let ((keys (remove-if-not (lambda (input) (typep input 'key-input)) (inputs))))
@@ -96,17 +98,12 @@
         (ok (equal '(7 3) (list (lem-display-relay/input::mouse-input-x wheel)
                                 (lem-display-relay/input::mouse-input-y wheel))))))))
 
-(deftest paste-resize-and-clipboard-replies
+(deftest paste-resize-and-an-ignored-clipboard-reply
   (let ((inputs (inputs)))
     (ok (equal "pasted" (lem-display-relay/input::paste-input-text
                          (find-if (lambda (i) (typep i 'paste-input)) inputs))))
     (let ((resize (find-if (lambda (i) (typep i 'resize-input)) inputs)))
       (ok (equal '(120 40) (list (lem-display-relay/input::resize-input-width resize)
                                  (lem-display-relay/input::resize-input-height resize)))))
-    (let ((replies (remove-if-not (lambda (i) (typep i 'clipboard-reply)) inputs)))
-      (ok (equal '((7 "from the display") (8 nil))
-                 (mapcar (lambda (reply)
-                           (list (lem-display-relay/input::clipboard-reply-reply-to reply)
-                                 (lem-display-relay/input::clipboard-reply-text reply)))
-                         replies))
-          "an absent text is no text, not an empty one"))))
+    (ok (= 1 (count :ignored (fixture-requests) :key #'first))
+        "a display's ClipboardReply is ignored (ADR 0020)")))

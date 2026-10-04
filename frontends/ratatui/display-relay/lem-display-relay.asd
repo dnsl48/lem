@@ -2,7 +2,7 @@
   :description "Lem's lem-if protocol relayed to a separate display process
 as frames. Codec-independent; lem-display-relay/protobuf puts it on the wire.
 ADRs 0009 and 0019, frontends/ratatui/docs/adr/."
-  :depends-on ("lem/core" "lem-ipc-channels")
+  :depends-on ("lem/core")
   :serial t
   :components ((:file "frame")
                (:file "view")
@@ -17,7 +17,7 @@ ADRs 0010-0014, defined in frontends/ratatui/proto. Needs `make
 toolchain`: loading compiles the schema with protoc and cl-protobufs'
 plugin, which the Makefile puts on PATH."
   :defsystem-depends-on ("cl-protobufs.asdf")
-  :depends-on ("lem-display-relay" "cl-protobufs")
+  :depends-on ("lem-display-relay" "lem-ipc-channels" "cl-protobufs")
   :pathname "protobuf/"
   :serial t
   :components ((:protobuf-source-file "display"
