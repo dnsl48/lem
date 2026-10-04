@@ -191,12 +191,20 @@ with it, so nothing waits; the relay logs what it got, or `unknown`.
 Set `LEM_RATATUI_DEBUG=1` to turn off frame suppression, so every
 frame and modeline Lem draws is sent (ADR 0012), and
 `LEM_RATATUI_BACKTRACE=6` to dump every thread's backtrace after six
-seconds when the editor appears stuck. The relay's own warnings go to
-Lem's log, `<lem-home>/debug.log`. Lem's stderr goes to `lem.log` in the
+seconds. The relay's own warnings go to Lem's log,
+`<lem-home>/debug.log`.
+
+Each session has its own logs, named by its session id, in the
 launcher's state directory (`$XDG_STATE_HOME/lem-ratatui/`, else
-`$HOME/.local/state/lem-ratatui/`); if Lem dies or exits non-zero the
-launcher says so, names that log, and exits non-zero. The OS agent's
-stderr goes to `os-agent.log` beside it, in the same directory.
+`$HOME/.local/state/lem-ratatui/`): Lem's stderr in
+`lem-<session-id>.log`, the OS agent's in `os-agent-<session-id>.log`.
+The newest ten sessions' logs are kept. If Lem dies or exits non-zero the
+launcher says so, names its log, and exits non-zero.
+
+When the editor seems stuck, `kill -USR1 <pid>` (the
+`lem-ratatui-lisp` process) writes every thread's backtrace to that
+session's `lem-<session-id>.log` while it is stuck, without stopping it:
+the editor thread's shows what it is busy with.
 
 There is deliberately no `make ratatui` target in the root `Makefile`
 and no `lem.asd` registration yet.
@@ -329,7 +337,7 @@ on the wire.
 ## Acceptance
 
 ```bash
-python3 scripts/acceptance.py      # needs `make` to have run; 16 checks
+python3 scripts/acceptance.py      # needs `make` to have run; 17 checks
 ```
 
 ## Next steps

@@ -29,12 +29,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-/// The log file names in the state directory (`session::state_dir`),
-/// reused across sessions. Lem's stderr is never inherited — a backtrace
-/// would land on the display and shred it — so it always goes to a file
-/// when one can be arranged, same as the agent's.
-const LEM_LOG_NAME: &str = "lem.log";
-const AGENT_LOG_NAME: &str = "os-agent.log";
+/// How many sessions' logs the state directory (`session::state_dir`)
+/// keeps: each session writes its own pair (`session::log_names`), and the
+/// oldest are removed as new ones start. Lem's stderr is never inherited —
+/// a backtrace would land on the display and shred it — so it always goes
+/// to a file when one can be arranged, same as the agent's.
+const KEEP_SESSIONS: usize = 10;
 
 /// How long Lem gets to exit on its own once the display has gone. It
 /// normally exits first — its hanging up is what ends the display — so
@@ -310,8 +310,13 @@ fn run(programs: &Programs, args: &[OsString]) -> Result<Ended> {
     let mut warnings = Vec::new();
 
     let log_dir = resolve_log_dir(&mut warnings);
-    let lem_log = log_dir.as_deref().map(|dir| dir.join(LEM_LOG_NAME));
-    let agent_log = log_dir.as_deref().map(|dir| dir.join(AGENT_LOG_NAME));
+    if let Some(dir) = &log_dir {
+        // Room for this session's pair among the ones kept.
+        session::prune_logs(dir, KEEP_SESSIONS - 1);
+    }
+    let (lem_log_name, agent_log_name) = session::log_names(&session);
+    let lem_log = log_dir.as_deref().map(|dir| dir.join(&lem_log_name));
+    let agent_log = log_dir.as_deref().map(|dir| dir.join(&agent_log_name));
 
     // One pipe each way. Lem is started with its ends and the display with
     // the others; the expressions holding them are dropped as soon as each

@@ -93,6 +93,51 @@ pub fn ensure_state_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The log file names for session `id`: Lem's, then the agent's. One pair
+/// per session, so a new session — or a second one running beside it —
+/// never truncates the log that explains an earlier one.
+pub fn log_names(id: &str) -> (String, String) {
+    (format!("lem-{id}.log"), format!("os-agent-{id}.log"))
+}
+
+/// The session a log file in the state directory belongs to, if it is one
+/// of `log_names`'s.
+fn log_session(name: &str) -> Option<&str> {
+    let id = name
+        .strip_suffix(".log")?
+        .strip_prefix("lem-")
+        .or_else(|| name.strip_suffix(".log")?.strip_prefix("os-agent-"))?;
+    uuid::Uuid::parse_str(id).is_ok().then_some(id)
+}
+
+/// Delete the logs of all but the newest `keep` sessions in `dir`. Session
+/// ids are UUIDv7s, which sort by creation time as text. Anything else in
+/// the directory is left alone, and a failure only means old logs stay.
+pub fn prune_logs(dir: &Path, keep: usize) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let logs: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let id = log_session(&name)?.to_owned();
+            Some((id, entry.path()))
+        })
+        .collect();
+    let mut ids: Vec<&str> = logs.iter().map(|(id, _)| id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let Some(oldest_kept) = ids.len().checked_sub(keep).map(|first| ids.get(first)) else {
+        return;
+    };
+    for (id, path) in &logs {
+        if oldest_kept.is_none_or(|oldest| id.as_str() < *oldest) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +251,67 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(ensure_state_dir(&dir).is_ok());
+    }
+
+    #[test]
+    fn each_session_names_its_own_logs() {
+        let id = "01a1053b-8d68-7768-83c9-cc480f904da1";
+        assert_eq!(
+            log_names(id),
+            (format!("lem-{id}.log"), format!("os-agent-{id}.log"))
+        );
+    }
+
+    #[test]
+    fn pruning_keeps_the_newest_sessions_logs_and_nothing_else_is_touched() {
+        let dir = tempfile::tempdir().unwrap();
+        // UUIDv7s sort by time as text, so 00..11 is oldest to newest.
+        let ids: Vec<String> = (0..12)
+            .map(|n| format!("01a10000-0000-7000-8000-0000000000{n:02}"))
+            .collect();
+        for id in &ids {
+            let (lem, agent) = log_names(id);
+            fs::write(dir.path().join(lem), "").unwrap();
+            fs::write(dir.path().join(agent), "").unwrap();
+        }
+        for other in [
+            "lem.log",
+            "os-agent.log",
+            "notes.txt",
+            "lem-not-a-session.txt",
+        ] {
+            fs::write(dir.path().join(other), "").unwrap();
+        }
+
+        prune_logs(dir.path(), 3);
+
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        let mut expected: Vec<String> = ids[9..]
+            .iter()
+            .flat_map(|id| {
+                let (lem, agent) = log_names(id);
+                [lem, agent]
+            })
+            .chain(
+                [
+                    "lem.log",
+                    "os-agent.log",
+                    "notes.txt",
+                    "lem-not-a-session.txt",
+                ]
+                .map(String::from),
+            )
+            .collect();
+        expected.sort();
+        assert_eq!(left, expected);
+    }
+
+    #[test]
+    fn pruning_a_missing_directory_is_quiet() {
+        prune_logs(Path::new("/nonexistent/lem-ratatui-logs"), 3);
     }
 }

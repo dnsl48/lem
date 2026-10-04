@@ -4,6 +4,8 @@
            :*protocol-output*
            :*log-stream*
            :start-debug-watchdog
+           :dump-backtraces
+           :install-backtrace-signal
            :*backtrace-delay*
            :call-with-protocol-streams))
 (in-package :lem-ratatui/transport)
@@ -32,31 +34,53 @@ editor thread, which `run-editor-thread' wraps in `with-editor-stream',
 and that rebinds the standard streams. Diagnostics written there vanish
 into the editor rather than reaching the log the launcher captures.")
 
-(defun start-debug-watchdog (&key (delay 6))
-  "After DELAY seconds, dump every thread's backtrace to stderr.
+(defun dump-backtraces (log &key (why "requested"))
+  "Write every thread's backtrace to the stream LOG, each under a line
+naming the thread, after a line saying WHY.
 
 A protocol child has no REPL and no debugger, so when the editor thread
 fails to make progress there is otherwise no way to see where it is
-parked. Gated on LEM_RATATUI_BACKTRACE rather than LEM_RATATUI_DEBUG
-because it interrupts every running thread, which is too invasive to do
-merely because logging is on."
+parked. Each thread is interrupted to print its own backtrace, which is
+invasive: it is done only when asked (`start-debug-watchdog',
+`install-backtrace-signal')."
+  (format log "~&[lem-ratatui] === backtraces (~A) ===~%" why)
+  (force-output log)
+  (dolist (thread (sb-thread:list-all-threads))
+    (let ((name (sb-thread:thread-name thread)))
+      (format log "~&[lem-ratatui] === thread ~A ===~%" name)
+      (force-output log)
+      (unless (eq thread sb-thread:*current-thread*)
+        (ignore-errors
+         (sb-thread:interrupt-thread
+          thread
+          (lambda ()
+            (sb-debug:print-backtrace :stream log :count 40)
+            (force-output log))))
+        (sleep 0.3)))))
+
+(defun start-debug-watchdog (&key (delay 6))
+  "After DELAY seconds, dump every thread's backtrace to stderr
+(`dump-backtraces'). Gated on LEM_RATATUI_BACKTRACE rather than
+LEM_RATATUI_DEBUG because it interrupts every running thread, which is
+too invasive to do merely because logging is on."
   (let ((log *error-output*))
     (sb-thread:make-thread
      (lambda ()
        (sleep delay)
-       (dolist (thread (sb-thread:list-all-threads))
-         (let ((name (sb-thread:thread-name thread)))
-           (format log "~&[lem-ratatui] === thread ~A ===~%" name)
-           (force-output log)
-           (unless (eq thread sb-thread:*current-thread*)
-             (ignore-errors
-              (sb-thread:interrupt-thread
-               thread
-               (lambda ()
-                 (sb-debug:print-backtrace :stream log :count 25)
-                 (force-output log))))
-             (sleep 0.3)))))
+       (dump-backtraces log :why (format nil "LEM_RATATUI_BACKTRACE=~D" delay)))
      :name "lem-ratatui debug watchdog")))
+
+(defun install-backtrace-signal (log)
+  "On SIGUSR1, dump every thread's backtrace to the stream LOG
+(`dump-backtraces'): `kill -USR1 <pid>' shows where a stuck editor is,
+while it is stuck, without a debugger. The dump runs on a thread of its
+own, not in the signal handler."
+  (sb-sys:enable-interrupt
+   sb-unix:sigusr1
+   (lambda (signal info context)
+     (declare (ignore signal info context))
+     (sb-thread:make-thread (lambda () (dump-backtraces log :why "SIGUSR1"))
+                            :name "lem-ratatui backtraces"))))
 
 (defun make-protocol-stream (fd &key input output)
   "Return an octet stream on FD.
@@ -100,6 +124,7 @@ wants: it sees EOF and restores the terminal."
          (*terminal-io* (make-two-way-stream (make-concatenated-stream) log))
          (*debug-io* *terminal-io*)
          (*query-io* *terminal-io*))
+    (install-backtrace-signal log)
     (when *backtrace-delay*
       (start-debug-watchdog :delay *backtrace-delay*))
     (funcall function)))
