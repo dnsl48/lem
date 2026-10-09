@@ -279,8 +279,10 @@ def run_case(binary, mode, *, queued=False, send_keys=False):
             expected += [text_key("a"), text_key("]", (1,)), text_key("b"),
                          text_key("5", (1,)), text_key("č"), text_key("š")]
         if send_keys:
+            # Ctrl+] as the kitty protocol sends it, CSI 93;5u. A raw 0x1D
+            # here reads as Ctrl+5 until termina names the C0 bytes (ADR 0021).
             os.write(session.master,
-                     b"\x1b[53;5u\x1d\x1b[103;6u\x1b[103:71;6u\x07"
+                     b"\x1b[53;5u\x1b[93;5u\x1b[103;6u\x1b[103:71;6u\x07"
                      b"\x1b[57403;5u\x1b[52;5u\xc4\x8d\xc5\xa1")
             expected += [text_key("5", (1,)), text_key("]", (1,)),
                          text_key("g", (1, 3)), text_key("G", (1,)), text_key("g", (1,)),
