@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["crates/lem-protocols", "crates/lem-os-agent", "crates/lem-ratatui", "crates/lem-ratatui-launcher"]
-exclude = ["vendor/crossterm"]
 
 [workspace.package]
 version = "0.1.0"

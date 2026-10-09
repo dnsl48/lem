@@ -1,6 +1,6 @@
 # lem-ratatui
 
-A terminal frontend for Lem built on `crossterm`. Lem's side is
+A terminal frontend for Lem, for Linux, macOS and Windows through WSL. Lem's side is
 `lem-display-relay`, our own implementation of the `lem-if` protocol, and
 the two halves speak `lem.display.v1`, a protobuf protocol defined in
 [`proto/`](proto/lem/display/v1/display.proto) (see
@@ -62,12 +62,14 @@ Lem resolves its own window tree and layout before emitting anything, and
 sends absolutely-positioned paint commands in cell coordinates. So
 Ratatui's widget library and layout solver are unused — this depends on
 `ratatui-core` for `Buffer`/`Cell`/`Style` and its diff, and nothing
-else. The display writes to the terminal itself, with crossterm, because
-Ratatui's own output cannot draw curly or dotted underlines. Calling it a
-crossterm frontend that borrows Ratatui's cell buffer is more honest.
+else. The display writes to the terminal itself, because Ratatui's own
+output cannot draw curly or dotted underlines, and reads it with
+`termina`. Calling it a termina frontend that borrows Ratatui's cell
+buffer is more honest.
 
-See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md) and
-[`0016`](docs/adr/0016-underline-styles.md).
+See [`docs/adr/0002`](docs/adr/0002-ratatui-core-over-full-ratatui.md),
+[`0016`](docs/adr/0016-underline-styles.md) and
+[`0021`](docs/adr/0021-termina-instead-of-a-patched-crossterm.md).
 
 ## Layout
 
@@ -430,13 +432,12 @@ Shifted printable chords use Lem's character convention: Ctrl+Shift+G is
 not Shift. Terminal or desktop shortcuts may still intercept a gesture
 before it reaches Lem.
 
-The Rust workspace carries a narrowly patched crossterm 0.29.0 under
-`rust/vendor/`. Its terminal query writes only to `/dev/tty`, waits within
-the supplied deadline and preserves input queued during detection. It also
-decodes the raw C0 bytes 0x1C–0x1F by their ASCII names, `C-\`, `C-]`,
-`C-^` and `C-_`. Enhanced Ctrl+4 through Ctrl+7 therefore remain distinct
-from those control keys, including when legacy input was queued during
-negotiation. The local patch record documents the upstream source and fixes.
+The display reads the terminal with `termina` (ADR 0021). Its keyboard
+query writes only to the terminal, never to the protocol on stdout,
+waits at most one second in all, and keeps keys typed meanwhile, in
+order. Under legacy encoding the raw C0 bytes 0x1C–0x1F are named by
+their ASCII keys, `C-\`, `C-]`, `C-^` and `C-_`; under the kitty
+protocol, Ctrl+4 through Ctrl+7 are the digits.
 
 Keyboard flags are restored once on exit or panic, before leaving the
 alternate screen. A terminal that cannot report enhanced keys continues to
@@ -448,14 +449,13 @@ Focused keyboard checks, from this frontend directory:
 ```sh
 cargo build --manifest-path rust/Cargo.toml -p lem-ratatui
 python3 scripts/keyboard-acceptance.py
-cargo test --manifest-path rust/vendor/crossterm/Cargo.toml --lib
-python3 rust/vendor/crossterm/tests/keyboard_probe_pty.py
 ```
 
 These use isolated PTYs and protocol pipes. They verify negotiation,
-fallback, queued keys and restoration without opening Lem or changing a
-personal configuration. Physical gestures still need checking in the
-terminal and keyboard layout in use.
+fallback, queued keys, restoration, a terminal hang-up and unfinished
+input without opening Lem or changing a personal configuration.
+Physical gestures still need checking in the terminal and keyboard
+layout in use.
 
 ## Tabbar
 
