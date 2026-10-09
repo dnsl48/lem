@@ -31,13 +31,14 @@ implements 0009–0011 is [`../relay-plan.md`](../relay-plan.md).
 | [0011](0011-a-frame-oriented-protocol.md) | A frame-oriented protocol designed for a terminal | Accepted (principles; schema in phase 2); refined by 0012; open questions answered by 0012, 0013 |
 | [0012](0012-the-relay-frame-model.md) | The relay's frame model | Accepted; italic follow-up superseded by 0015 |
 | [0013](0013-icons-and-mouse-input.md) | Icons as text, clicks counted by the relay, and every message's identity and time | Accepted; session id's maker revised by 0019 |
-| [0014](0014-the-display-describes-keys.md) | The display describes keys; the relay names them | Accepted |
+| [0014](0014-the-display-describes-keys.md) | The display describes keys; the relay names them | Accepted; C0 decoding revised by 0021 |
 | [0015](0015-font-styles-without-touching-lem.md) | Font styles without touching Lem: italic, strikethrough, dim | Superseded by 0017 |
-| [0016](0016-underline-styles.md) | Underline styles, and our own terminal output | Accepted; revised by 0017 |
+| [0016](0016-underline-styles.md) | Underline styles, and our own terminal output | Accepted; revised by 0017, 0021 |
 | [0017](0017-font-styles-and-links-in-lem-attributes.md) | Font styles and links in Lem's attributes (a core patch) | Accepted; supersedes 0015 |
 | [0018](0018-hyperlinks.md) | Web addresses as terminal hyperlinks | Accepted |
 | [0019](0019-an-os-agent-and-a-link-per-peer.md) | An OS agent, and a link per peer rather than a bus | Accepted; clipboard split revised by 0020 |
 | [0020](0020-the-clipboard-belongs-to-the-agent.md) | The clipboard belongs to the agent; the display offers OSC 52 | Accepted |
+| [0021](0021-termina-instead-of-a-patched-crossterm.md) | termina instead of a patched crossterm | Accepted |
 
 ## Adding one
 
