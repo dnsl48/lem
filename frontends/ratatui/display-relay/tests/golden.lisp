@@ -7,7 +7,7 @@
 
 ;;; The Rust → Lisp golden test. proto/fixtures/display-inputs.v1.bin is
 ;;; what the display sends for a fixed session, built by lem-ratatui's own
-;;; conversions from crossterm events (rust/crates/lem-ratatui/src/golden.rs).
+;;; conversions from terminal events (rust/crates/lem-ratatui/src/golden.rs).
 ;;; Here it is decoded, and checked against what Lem receives.
 
 (defun fixture-requests ()

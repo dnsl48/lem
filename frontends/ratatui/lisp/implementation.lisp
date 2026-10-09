@@ -27,8 +27,8 @@
    ;; elements rather than occupying cells.
    :window-left-margin 1
    :window-bottom-margin 1
-   ;; Off, matching ncurses, despite modern terminals supporting SGR 58
-   ;; and crossterm exposing SetUnderlineColor.
+   ;; Off, matching ncurses, despite modern terminals supporting SGR 58,
+   ;; which the display can write.
    ;;
    ;; The flag has exactly one call site in Lem
    ;; (src/ext/multi-column-list.lisp:214), and there it reaches for

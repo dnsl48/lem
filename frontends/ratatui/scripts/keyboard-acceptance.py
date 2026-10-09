@@ -7,6 +7,8 @@ Defaults to the Rust debug display. Needs only Python's standard library,
 does not start Lem or read its personal configuration, and never touches the
 caller's terminal. The child's stdin/stdout are protocol pipes; its controlling
 PTY supplies terminal replies and keys. No generated files are needed.
+It also checks that a terminal hang-up ends the display, and that input
+which never completes an escape sequence does not hold up the protocol.
 """
 
 import argparse
@@ -16,6 +18,7 @@ from pathlib import Path
 import pty
 import re
 import select
+import signal
 import struct
 import subprocess
 import termios
@@ -106,7 +109,7 @@ def text_key(text, modifiers=(), keypad=False):
 
 
 class Session:
-    def __init__(self, binary, mode, *, queued=False, answer_colours=True):
+    def __init__(self, binary, mode, *, queued=False, answer_colours=True, ignore_hangup=False):
         self.mode = mode
         self.queued = queued
         self.answer_colours = answer_colours
@@ -128,6 +131,9 @@ class Session:
         def controlling_terminal():
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
+            if ignore_hangup:
+                # Leave end-of-file as the only sign the terminal went away.
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
         # This display-only test needs no home directory, configuration or
         # desktop clipboard connection. Keep the child environment minimal.
@@ -259,13 +265,20 @@ class Session:
         if POP in self.terminal:
             assert self.terminal.index(POP) < self.terminal.index(LEAVE_SCREEN), "keyboard popped too late"
 
+    def hang_up(self):
+        """Close the terminal, as a closed window or a dropped SSH session does."""
+        self.readers.discard(self.master)
+        os.close(self.master)
+        self.master = None
+
     def close(self):
         if self.child.poll() is None:
             self.child.kill()
             self.child.wait()
         for stream in (self.child.stdin, self.child.stdout, self.child.stderr):
             stream.close()
-        os.close(self.master)
+        if self.master is not None:
+            os.close(self.master)
         os.close(self.slave)
 
 
@@ -317,6 +330,37 @@ def run_case(binary, mode, *, queued=False, send_keys=False):
         session.close()
 
 
+def run_hangup(binary):
+    session = Session(binary, "legacy", ignore_hangup=True)
+    try:
+        session.hello()
+        session.hang_up()
+        started = time.monotonic()
+        # A display that spins on end-of-file never gets here.
+        session.until(lambda: session.child.poll() is not None, seconds=2)
+        print(f"PASS hangup: the display exited {time.monotonic() - started:.3f}s "
+              f"after its terminal closed")
+    finally:
+        session.close()
+
+
+def run_stall(binary):
+    session = Session(binary, "legacy")
+    try:
+        session.hello()
+        # An escape sequence that never completes is no event. The display
+        # must go on serving Lem, not wait inside read() for the next key.
+        os.write(session.master, b"\x1b[")
+        session.pump(0.2)
+        started = time.monotonic()
+        session.exit()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1, f"stall: Lem's Exit waited {elapsed:.3f}s behind terminal input"
+        print(f"PASS stall: Exit served {elapsed:.3f}s after an unfinished escape sequence")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", type=Path,
@@ -329,7 +373,9 @@ def main():
     for mode in ("legacy", "override", "timeout", "silent", "malformed",
                  "confirmation_failed", "confirmation_timeout"):
         run_case(binary, mode)
-    print("8/8 keyboard acceptance checks passed")
+    run_hangup(binary)
+    run_stall(binary)
+    print("10/10 keyboard acceptance checks passed")
 
 
 if __name__ == "__main__":
