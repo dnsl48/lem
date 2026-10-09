@@ -21,17 +21,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use crossterm::cursor::{self, SetCursorStyle};
-use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use lem_protocols::display::v1::TerminalCapabilities;
 
+use crate::ansi;
 use crate::keyboard;
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 
 #[cfg(unix)]
 const TTY: &str = "/dev/tty";
@@ -76,14 +70,9 @@ impl Cleanup {
 
         let keyboard = keyboard::pop_if_owned(out, &self.keyboard_pushed);
         // Leave the screen even if popping the keyboard stack failed.
-        let screen = execute!(
-            out,
-            DisableBracketedPaste,
-            DisableMouseCapture,
-            SetCursorStyle::DefaultUserShape,
-            cursor::Show,
-            LeaveAlternateScreen
-        );
+        let screen = out
+            .write_all(ansi::LEAVE.as_bytes())
+            .and_then(|()| out.flush());
         // A broken output must never prevent restoring the terminal mode.
         let raw = disable_raw();
         keyboard.and(screen).and(raw)
@@ -130,13 +119,8 @@ impl Guard {
             previous(info);
         }));
 
-        execute!(
-            &mut guard.tty,
-            EnterAlternateScreen,
-            cursor::Hide,
-            EnableMouseCapture,
-            EnableBracketedPaste
-        )?;
+        guard.tty.write_all(ansi::ENTER.as_bytes())?;
+        guard.tty.flush()?;
         let legacy =
             std::env::var_os("LEM_RATATUI_KEYBOARD").is_some_and(|value| value == "legacy");
         guard.capabilities = keyboard::negotiate(

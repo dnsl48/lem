@@ -18,19 +18,13 @@ use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, Write};
 
-use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
-use crossterm::queue;
-use crossterm::style::{
-    Attribute, Color as CColor, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
-    SetUnderlineColor,
-};
-use crossterm::terminal::{Clear, ClearType};
 use lem_protocols::display::v1::{CursorShape, UnderlineStyle};
 use ratatui_core::buffer::Cell;
 use ratatui_core::layout::Position;
 use ratatui_core::style::{Color, Modifier};
 use unicode_width::UnicodeWidthStr;
 
+use crate::ansi::{self, Sgr};
 use crate::paint::{Layer, Link};
 
 /// Writes frames to the terminal, each as the difference from the last.
@@ -83,13 +77,13 @@ impl<W: Write> Presenter<W> {
         cursor: Option<Position>,
         shape: Option<CursorShape>,
     ) -> io::Result<()> {
-        queue!(self.out, Hide)?;
+        self.out.write_all(ansi::HIDE_CURSOR.as_bytes())?;
         let previous = match self.previous.take() {
             Some(previous) if previous.area() == frame.area() => previous,
             // First frame, or a new size: start from a cleared screen,
             // which is what an empty layer describes.
             _ => {
-                queue!(self.out, Clear(ClearType::All))?;
+                self.out.write_all(ansi::CLEAR.as_bytes())?;
                 Layer::new(frame.area().width, frame.area().height)
             }
         };
@@ -98,12 +92,13 @@ impl<W: Write> Presenter<W> {
 
         if shape != self.shape {
             if let Some(shape) = shape {
-                queue!(self.out, cursor_style(shape))?;
+                self.out.write_all(ansi::cursor_shape(shape).as_bytes())?;
             }
             self.shape = shape;
         }
         if let Some(position) = cursor {
-            queue!(self.out, MoveTo(position.x, position.y), Show)?;
+            ansi::move_to(&mut self.out, position.x, position.y)?;
+            self.out.write_all(ansi::SHOW_CURSOR.as_bytes())?;
         }
         self.out.flush()?;
         self.previous = Some(frame.clone());
@@ -122,7 +117,7 @@ impl<W: Write> Presenter<W> {
         for &(x, y) in positions {
             let cell = &frame.cells[(x, y)];
             if next != Some((x, y)) {
-                queue!(self.out, MoveTo(x, y))?;
+                ansi::move_to(&mut self.out, x, y)?;
             }
             let wanted = cell.modifier - Modifier::UNDERLINED;
             if wanted != modifier {
@@ -135,15 +130,15 @@ impl<W: Write> Presenter<W> {
                 .then(|| *frame.underline.get(x, y));
             if wanted != underline {
                 let attribute = self.underline_attribute(wanted);
-                queue!(self.out, SetAttribute(attribute))?;
+                ansi::sgr(&mut self.out, attribute)?;
                 underline = wanted;
             }
             if cell.fg != fg {
-                queue!(self.out, SetForegroundColor(crossterm_color(cell.fg)))?;
+                ansi::foreground(&mut self.out, cell.fg)?;
                 fg = cell.fg;
             }
             if cell.bg != bg {
-                queue!(self.out, SetBackgroundColor(crossterm_color(cell.bg)))?;
+                ansi::background(&mut self.out, cell.bg)?;
                 bg = cell.bg;
             }
             let wanted = frame.link.get(x, y).as_ref().filter(|_| self.hyperlinks);
@@ -152,36 +147,30 @@ impl<W: Write> Presenter<W> {
                 link = wanted;
             }
             if cell.underline_color != underline_color {
-                queue!(
-                    self.out,
-                    SetUnderlineColor(crossterm_color(cell.underline_color))
-                )?;
+                ansi::underline_color(&mut self.out, cell.underline_color)?;
                 underline_color = cell.underline_color;
             }
-            queue!(self.out, Print(cell.symbol()))?;
+            self.out.write_all(cell.symbol().as_bytes())?;
             next = Some((x.saturating_add(cell_width(cell)), y));
         }
         if link.is_some() {
             queue_hyperlink(&mut self.out, None)?;
         }
-        queue!(
-            self.out,
-            SetForegroundColor(CColor::Reset),
-            SetBackgroundColor(CColor::Reset),
-            SetUnderlineColor(CColor::Reset),
-            SetAttribute(Attribute::Reset)
-        )
+        ansi::foreground(&mut self.out, Color::Reset)?;
+        ansi::background(&mut self.out, Color::Reset)?;
+        ansi::underline_color(&mut self.out, Color::Reset)?;
+        ansi::sgr(&mut self.out, Sgr::Reset)
     }
 
-    fn underline_attribute(&self, underline: Option<UnderlineStyle>) -> Attribute {
+    fn underline_attribute(&self, underline: Option<UnderlineStyle>) -> Sgr {
         match underline {
-            None => Attribute::NoUnderline,
-            Some(_) if !self.styled_underlines => Attribute::Underlined,
-            Some(UnderlineStyle::Straight) => Attribute::Underlined,
-            Some(UnderlineStyle::Curly) => Attribute::Undercurled,
-            Some(UnderlineStyle::Dotted) => Attribute::Underdotted,
-            Some(UnderlineStyle::Dashed) => Attribute::Underdashed,
-            Some(UnderlineStyle::Double) => Attribute::DoubleUnderlined,
+            None => Sgr::NoUnderline,
+            Some(_) if !self.styled_underlines => Sgr::Underlined,
+            Some(UnderlineStyle::Straight) => Sgr::Underlined,
+            Some(UnderlineStyle::Curly) => Sgr::Undercurled,
+            Some(UnderlineStyle::Dotted) => Sgr::Underdotted,
+            Some(UnderlineStyle::Dashed) => Sgr::Underdashed,
+            Some(UnderlineStyle::Double) => Sgr::DoubleUnderlined,
         }
     }
 }
@@ -245,90 +234,57 @@ fn changed(previous: &Layer, frame: &Layer) -> Vec<(u16, u16)> {
 fn queue_modifier_diff(out: &mut impl Write, from: Modifier, to: Modifier) -> io::Result<()> {
     let removed = from - to;
     if removed.contains(Modifier::REVERSED) {
-        queue!(out, SetAttribute(Attribute::NoReverse))?;
+        ansi::sgr(out, Sgr::NoReverse)?;
     }
     let reset_intensity = removed.contains(Modifier::BOLD) || removed.contains(Modifier::DIM);
     if reset_intensity {
-        queue!(out, SetAttribute(Attribute::NormalIntensity))?;
+        ansi::sgr(out, Sgr::NormalIntensity)?;
         if to.contains(Modifier::DIM) {
-            queue!(out, SetAttribute(Attribute::Dim))?;
+            ansi::sgr(out, Sgr::Dim)?;
         }
         if to.contains(Modifier::BOLD) {
-            queue!(out, SetAttribute(Attribute::Bold))?;
+            ansi::sgr(out, Sgr::Bold)?;
         }
     }
     if removed.contains(Modifier::ITALIC) {
-        queue!(out, SetAttribute(Attribute::NoItalic))?;
+        ansi::sgr(out, Sgr::NoItalic)?;
     }
     if removed.contains(Modifier::CROSSED_OUT) {
-        queue!(out, SetAttribute(Attribute::NotCrossedOut))?;
+        ansi::sgr(out, Sgr::NotCrossedOut)?;
     }
     if removed.contains(Modifier::HIDDEN) {
-        queue!(out, SetAttribute(Attribute::NoHidden))?;
+        ansi::sgr(out, Sgr::NoHidden)?;
     }
     if removed.intersects(Modifier::SLOW_BLINK | Modifier::RAPID_BLINK) {
-        queue!(out, SetAttribute(Attribute::NoBlink))?;
+        ansi::sgr(out, Sgr::NoBlink)?;
     }
 
     let added = to - from;
     if added.contains(Modifier::REVERSED) {
-        queue!(out, SetAttribute(Attribute::Reverse))?;
+        ansi::sgr(out, Sgr::Reverse)?;
     }
     if added.contains(Modifier::BOLD) && !reset_intensity {
-        queue!(out, SetAttribute(Attribute::Bold))?;
+        ansi::sgr(out, Sgr::Bold)?;
     }
     if added.contains(Modifier::DIM) && !reset_intensity {
-        queue!(out, SetAttribute(Attribute::Dim))?;
+        ansi::sgr(out, Sgr::Dim)?;
     }
     if added.contains(Modifier::ITALIC) {
-        queue!(out, SetAttribute(Attribute::Italic))?;
+        ansi::sgr(out, Sgr::Italic)?;
     }
     if added.contains(Modifier::CROSSED_OUT) {
-        queue!(out, SetAttribute(Attribute::CrossedOut))?;
+        ansi::sgr(out, Sgr::CrossedOut)?;
     }
     if added.contains(Modifier::HIDDEN) {
-        queue!(out, SetAttribute(Attribute::Hidden))?;
+        ansi::sgr(out, Sgr::Hidden)?;
     }
     if added.contains(Modifier::SLOW_BLINK) {
-        queue!(out, SetAttribute(Attribute::SlowBlink))?;
+        ansi::sgr(out, Sgr::SlowBlink)?;
     }
     if added.contains(Modifier::RAPID_BLINK) {
-        queue!(out, SetAttribute(Attribute::RapidBlink))?;
+        ansi::sgr(out, Sgr::RapidBlink)?;
     }
     Ok(())
-}
-
-/// Ratatui's colour as crossterm's, as `ratatui-crossterm` maps it.
-fn crossterm_color(color: Color) -> CColor {
-    match color {
-        Color::Reset => CColor::Reset,
-        Color::Black => CColor::Black,
-        Color::Red => CColor::DarkRed,
-        Color::Green => CColor::DarkGreen,
-        Color::Yellow => CColor::DarkYellow,
-        Color::Blue => CColor::DarkBlue,
-        Color::Magenta => CColor::DarkMagenta,
-        Color::Cyan => CColor::DarkCyan,
-        Color::Gray => CColor::Grey,
-        Color::DarkGray => CColor::DarkGrey,
-        Color::LightRed => CColor::Red,
-        Color::LightGreen => CColor::Green,
-        Color::LightBlue => CColor::Blue,
-        Color::LightYellow => CColor::Yellow,
-        Color::LightMagenta => CColor::Magenta,
-        Color::LightCyan => CColor::Cyan,
-        Color::White => CColor::White,
-        Color::Indexed(i) => CColor::AnsiValue(i),
-        Color::Rgb(r, g, b) => CColor::Rgb { r, g, b },
-    }
-}
-
-fn cursor_style(shape: CursorShape) -> SetCursorStyle {
-    match shape {
-        CursorShape::Bar => SetCursorStyle::SteadyBar,
-        CursorShape::Underline => SetCursorStyle::SteadyUnderScore,
-        CursorShape::Box | CursorShape::Unspecified => SetCursorStyle::SteadyBlock,
-    }
 }
 
 #[cfg(test)]
