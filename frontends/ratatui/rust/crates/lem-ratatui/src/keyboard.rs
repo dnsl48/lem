@@ -7,11 +7,10 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crossterm::Command;
-use crossterm::event::{
-    KeyboardEnhancementFlags as Flags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-};
+use crossterm::event::KeyboardEnhancementFlags as Flags;
 use lem_protocols::display::v1::TerminalCapabilities;
+
+use crate::ansi;
 
 const BUDGET: Duration = Duration::from_secs(1);
 
@@ -52,7 +51,7 @@ fn negotiate_with(
     }
 
     let requested = Flags::DISAMBIGUATE_ESCAPE_CODES | Flags::REPORT_ALTERNATE_KEYS;
-    if write_stack_command(out, pushed, PushKeyboardEnhancementFlags(requested), true).is_ok() {
+    if write_stack_command(out, pushed, &ansi::push_keyboard(requested.bits()), true).is_ok() {
         let timeout = remaining();
         if !timeout.is_zero()
             && let Ok(Some(active)) = query(timeout)
@@ -81,7 +80,7 @@ fn negotiate_with(
 /// before flushing, so a flush error cannot make cleanup pop twice.
 pub fn pop_if_owned(out: &mut impl Write, pushed: &AtomicBool) -> io::Result<()> {
     if pushed.load(Ordering::Acquire) {
-        write_stack_command(out, pushed, PopKeyboardEnhancementFlags, false)
+        write_stack_command(out, pushed, ansi::POP_KEYBOARD, false)
     } else {
         Ok(())
     }
@@ -90,14 +89,12 @@ pub fn pop_if_owned(out: &mut impl Write, pushed: &AtomicBool) -> io::Result<()>
 fn write_stack_command(
     out: &mut impl Write,
     pushed: &AtomicBool,
-    command: impl Command,
+    command: &str,
     owned_after_write: bool,
 ) -> io::Result<()> {
-    // Format first so write_all completion precisely marks the complete
-    // terminal command, separately from the subsequent flush result.
-    let mut bytes = String::new();
-    command.write_ansi(&mut bytes).map_err(io::Error::other)?;
-    out.write_all(bytes.as_bytes())?;
+    // write_all completing marks the complete terminal command precisely,
+    // separately from the subsequent flush result.
+    out.write_all(command.as_bytes())?;
     pushed.store(owned_after_write, Ordering::Release);
     out.flush()
 }

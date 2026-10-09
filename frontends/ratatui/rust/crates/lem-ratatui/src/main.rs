@@ -6,6 +6,7 @@
 //! own cursor where Lem's is. Starting Lem and connecting the two is
 //! `lem-ratatui-launcher`'s job, not this one's.
 
+mod ansi;
 mod colors;
 #[cfg(test)]
 mod golden;
