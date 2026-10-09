@@ -1,37 +1,81 @@
 //! Bounded, confirmed keyboard enhancement on the controlling terminal.
 //!
-//! crossterm remains the only input reader: its filtered query keeps keys
-//! typed during negotiation queued for the ordinary event loop.
+//! The display is the terminal's only reader: negotiation reads replies
+//! itself (`probe.rs`) and sets aside the keys typed meanwhile for the
+//! main loop (`events::Input`), decoded by when they were read.
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crossterm::event::KeyboardEnhancementFlags as Flags;
 use lem_protocols::display::v1::TerminalCapabilities;
+use termina::Event;
+use termina::escape::csi::KittyKeyboardFlags as Flags;
 
 use crate::ansi;
+use crate::events::Events;
+use crate::input::{self, Encoding};
+use crate::probe;
 
 const BUDGET: Duration = Duration::from_secs(1);
 
 /// The flag shared with terminal cleanup records completed push commands,
 /// rather than attempts that may have written no complete command.
-pub fn negotiate(out: &mut impl Write, pushed: &AtomicBool, legacy: bool) -> TerminalCapabilities {
+/// Events read meanwhile that are not replies go to `pending`, decoded.
+pub fn negotiate<W: Write>(
+    out: &mut W,
+    pushed: &AtomicBool,
+    legacy: bool,
+    events: &mut impl Events,
+    pending: &mut VecDeque<Event>,
+) -> TerminalCapabilities {
     let started = Instant::now();
-    negotiate_with(
+    let mut before_push = None;
+    let capabilities = negotiate_with(
         out,
         pushed,
         legacy,
-        crossterm::terminal::query_keyboard_enhancement_flags_with_timeout,
+        |out, timeout| {
+            let flags = probe::keyboard_flags(out, events, pending, timeout);
+            // Only the first query is answered before any push.
+            before_push.get_or_insert(pending.len());
+            flags
+        },
         || started.elapsed(),
-    )
+    );
+    decode_set_aside(pending, before_push.unwrap_or(0), encoding(&capabilities));
+    capabilities
 }
 
-fn negotiate_with(
-    out: &mut impl Write,
+/// How the terminal encodes keys under `capabilities`.
+pub fn encoding(capabilities: &TerminalCapabilities) -> Encoding {
+    if capabilities.keyboard_disambiguation {
+        Encoding::Kitty
+    } else {
+        Encoding::Legacy
+    }
+}
+
+/// Decode what negotiation set aside by the encoding in force when it
+/// was read: the first `before_push` events came before any push, so
+/// under legacy encoding; the rest under the outcome, `after`.
+fn decode_set_aside(pending: &mut VecDeque<Event>, before_push: usize, after: Encoding) {
+    for (index, event) in pending.iter_mut().enumerate() {
+        let encoding = if index < before_push {
+            Encoding::Legacy
+        } else {
+            after
+        };
+        input::decode(event, encoding);
+    }
+}
+
+fn negotiate_with<W: Write>(
+    out: &mut W,
     pushed: &AtomicBool,
     legacy: bool,
-    mut query: impl FnMut(Duration) -> io::Result<Option<Flags>>,
+    mut query: impl FnMut(&mut W, Duration) -> io::Result<Option<Flags>>,
     mut elapsed: impl FnMut() -> Duration,
 ) -> TerminalCapabilities {
     let legacy_capabilities = TerminalCapabilities::default();
@@ -41,7 +85,7 @@ fn negotiate_with(
 
     let mut remaining = || BUDGET.saturating_sub(elapsed());
     let timeout = remaining();
-    if timeout.is_zero() || !matches!(query(timeout), Ok(Some(_))) {
+    if timeout.is_zero() || !matches!(query(out, timeout), Ok(Some(_))) {
         return legacy_capabilities;
     }
     // Support detection can consume the whole budget. Avoid pushing an
@@ -54,7 +98,7 @@ fn negotiate_with(
     if write_stack_command(out, pushed, &ansi::push_keyboard(requested.bits()), true).is_ok() {
         let timeout = remaining();
         if !timeout.is_zero()
-            && let Ok(Some(active)) = query(timeout)
+            && let Ok(Some(active)) = query(out, timeout)
             && active.contains(requested)
             && !remaining().is_zero()
         {
@@ -118,7 +162,7 @@ mod tests {
             &mut out,
             &pushed,
             false,
-            |timeout| {
+            |_, timeout| {
                 calls.push(timeout);
                 if calls.len() == 1 {
                     elapsed.set(Duration::from_millis(750));
@@ -145,7 +189,7 @@ mod tests {
             &mut out,
             &AtomicBool::new(false),
             true,
-            |_| panic!("legacy must not query"),
+            |_, _| panic!("legacy must not query"),
             || Duration::ZERO,
         );
         assert_eq!(capabilities, TerminalCapabilities::default());
@@ -166,7 +210,7 @@ mod tests {
                 &mut out,
                 &pushed,
                 false,
-                |_| reply.take().unwrap(),
+                |_, _| reply.take().unwrap(),
                 || Duration::ZERO,
             );
             assert_eq!(capabilities, TerminalCapabilities::default());
@@ -183,7 +227,7 @@ mod tests {
             &mut out,
             &AtomicBool::new(false),
             false,
-            |_| {
+            |_, _| {
                 elapsed.set(BUDGET);
                 Ok(Some(Flags::empty()))
             },
@@ -208,7 +252,7 @@ mod tests {
                 &mut out,
                 &pushed,
                 false,
-                |_| replies.next().unwrap(),
+                |_, _| replies.next().unwrap(),
                 || Duration::ZERO,
             );
             assert_eq!(capabilities, TerminalCapabilities::default());
@@ -230,7 +274,7 @@ mod tests {
                 &mut out,
                 &pushed,
                 false,
-                |_| {
+                |_, _| {
                     queries += 1;
                     Ok(Some(Flags::empty()))
                 },
@@ -257,7 +301,7 @@ mod tests {
             &mut out,
             &pushed,
             false,
-            |_| {
+            |_, _| {
                 queries += 1;
                 Ok(Some(Flags::empty()))
             },
@@ -282,7 +326,7 @@ mod tests {
             &mut out,
             &pushed,
             false,
-            |_| Ok(Some(Flags::empty())),
+            |_, _| Ok(Some(Flags::empty())),
             || Duration::ZERO,
         );
         assert_eq!(capabilities, TerminalCapabilities::default());
@@ -303,7 +347,7 @@ mod tests {
             &mut out,
             &pushed,
             false,
-            |_| Ok(Some(Flags::empty())),
+            |_, _| Ok(Some(Flags::empty())),
             || Duration::ZERO,
         );
         assert_eq!(capabilities, TerminalCapabilities::default());
@@ -312,6 +356,28 @@ mod tests {
         pop_if_owned(&mut out, &pushed).unwrap();
         assert!(!pushed.load(Ordering::Acquire));
         assert_eq!(out.bytes, b"\x1b[>5u\x1b[\x1b[<1u");
+    }
+
+    #[test]
+    fn set_aside_keys_are_decoded_by_when_they_were_read() {
+        use crate::events::script::ctrl;
+        // One Ctrl+5 read before the push, one during confirmation.
+        let mut confirmed = VecDeque::from([ctrl('5'), ctrl('5')]);
+        decode_set_aside(&mut confirmed, 1, Encoding::Kitty);
+        assert_eq!(confirmed, [ctrl(']'), ctrl('5')]);
+        let mut refused = VecDeque::from([ctrl('5'), ctrl('5')]);
+        decode_set_aside(&mut refused, 1, Encoding::Legacy);
+        assert_eq!(refused, [ctrl(']'), ctrl(']')]);
+    }
+
+    #[test]
+    fn the_encoding_follows_confirmed_disambiguation() {
+        assert_eq!(encoding(&TerminalCapabilities::default()), Encoding::Legacy);
+        let confirmed = TerminalCapabilities {
+            keyboard_disambiguation: true,
+            ..TerminalCapabilities::default()
+        };
+        assert_eq!(encoding(&confirmed), Encoding::Kitty);
     }
 
     #[derive(Default)]

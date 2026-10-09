@@ -1,6 +1,6 @@
 [package]
 name = "lem-ratatui"
-description = "Terminal display half for Lem: paints lem.display.v1 frames with crossterm."
+description = "Terminal display half for Lem: paints lem.display.v1 frames on the terminal."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 anyhow = "1.0.104"
 base64 = "0.22"
-crossterm = "0.29.0"
+termina = "0.4"
 lem-protocols = { path = "../lem-protocols" }
 prost = "0.14"
 # The buffer, with its grapheme and width handling, and its diff. Not

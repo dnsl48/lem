@@ -8,6 +8,7 @@
 
 mod ansi;
 mod colors;
+mod events;
 #[cfg(test)]
 mod golden;
 mod input;
@@ -15,6 +16,7 @@ mod keyboard;
 mod metrics;
 mod paint;
 mod present;
+mod probe;
 mod screen;
 mod support;
 mod term;
@@ -26,23 +28,22 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEventKind};
 use lem_protocols::display::v1::{self, to_display, to_editor};
 use paint::Layer;
 use present::Presenter;
 use screen::Screen;
+use termina::Event;
+use termina::event::KeyEventKind;
 
 /// Size reported when there is no terminal to measure: headless runs and
 /// tests.
 const HEADLESS_SIZE: (u16, u16) = (80, 24);
 
 /// The terminal's current size, or [`HEADLESS_SIZE`] without one.
-fn display_size(interactive: bool) -> (u16, u16) {
-    if interactive {
-        crossterm::terminal::size().unwrap_or(HEADLESS_SIZE)
-    } else {
-        HEADLESS_SIZE
-    }
+fn display_size(guard: Option<&term::Guard>) -> (u16, u16) {
+    guard
+        .and_then(|guard| guard.size().ok())
+        .unwrap_or(HEADLESS_SIZE)
 }
 
 /// How the session ended, for the lines `scripts/workload.py` reads.
@@ -68,14 +69,14 @@ fn session_id(from_launcher: Option<String>) -> String {
 fn main() -> Result<()> {
     let started = Instant::now();
 
-    // Asked before the terminal is taken over and before crossterm reads
+    // Asked before the terminal is taken over and before termina reads
     // input, which would swallow the reply as keystrokes.
     let colors = colors::query();
 
     // Bound for the whole run: dropping it restores the terminal, so it
     // must outlive the draw loop. Matched by reference — consuming it here
     // would restore the terminal before the first frame is painted.
-    let guard = term::Guard::new_if_interactive()?;
+    let mut guard = term::Guard::new_if_interactive()?;
     let styled_underlines = support::styled_underlines(|name| std::env::var(name).ok());
     let hyperlinks = support::hyperlinks(|name| std::env::var(name).ok());
     let osc52 = clipboard_write(guard.is_some(), |name| std::env::var(name).ok());
@@ -86,11 +87,13 @@ fn main() -> Result<()> {
         ),
         None => None,
     };
+    // The terminal's input, for as long as there is a terminal.
+    let mut events = guard.as_mut().map(term::Guard::input);
 
     // Lem must be told the real geometry, not an assumed 80x24, or every
     // frame is laid out for the wrong screen. Kept up to date from resize
     // events: each frame is composited at this size.
-    let (mut width, mut height) = display_size(guard.is_some());
+    let (mut width, mut height) = display_size(guard.as_ref());
 
     let (mut reader, mut writer) = transport::stdio(started);
     let mut screen = Screen::default();
@@ -141,8 +144,10 @@ fn main() -> Result<()> {
 
     loop {
         // Input first, so a keystroke is never delayed behind a frame.
-        if presenter.is_some() && event::poll(Duration::from_millis(10))? {
-            let message = match event::read()? {
+        if let Some(events) = events.as_mut()
+            && let Some(event) = events.next(Duration::from_millis(10))?
+        {
+            let message = match event {
                 // Press only: under the kitty protocol and on Windows,
                 // releases and repeats arrive too and would double every
                 // keystroke.
@@ -152,11 +157,11 @@ fn main() -> Result<()> {
                 Event::Mouse(mouse) => Some(to_editor::Message::Mouse(input::mouse(mouse))),
                 Event::Paste(text) => Some(to_editor::Message::Paste(v1::Paste { text })),
                 // Lem lays out again and repaints (lem:update-on-display-resized).
-                Event::Resize(columns, rows) => {
-                    (width, height) = (columns, rows);
+                Event::WindowResized(size) => {
+                    (width, height) = (size.cols, size.rows);
                     Some(to_editor::Message::Resize(v1::Resize {
-                        width: u32::from(columns),
-                        height: u32::from(rows),
+                        width: u32::from(size.cols),
+                        height: u32::from(size.rows),
                     }))
                 }
                 _ => None,

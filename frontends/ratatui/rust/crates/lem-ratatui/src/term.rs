@@ -7,24 +7,26 @@
 //! that only holds if restore runs on every exit path — panics included.
 //!
 //! The terminal is the controlling one, opened by name, not stdio: stdin
-//! and stdout carry the protocol (`transport.rs`). crossterm already reads
-//! keys and the window size from `/dev/tty` when stdin is not a TTY, so
-//! only output has to be pointed there.
+//! and stdout carry the protocol (`transport.rs`). termina reads keys and
+//! the window size from `/dev/tty` when stdin and stdout are not
+//! terminals; the display writes through a handle of its own (ADR 0021).
 //!
 //! The mouse is captured (ADR 0013), which takes the terminal's own
 //! click-and-drag selection away; most terminals keep it on Shift+drag.
 //! Bracketed paste is on, so pasted text arrives as one `Paste`.
 
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use lem_protocols::display::v1::TerminalCapabilities;
+use termina::{Event, EventReader, PlatformTerminal, Terminal};
 
 use crate::ansi;
+use crate::events::Input;
 use crate::keyboard;
 
 #[cfg(unix)]
@@ -34,20 +36,12 @@ const TTY: &str = "CONOUT$";
 
 /// Raw mode and the alternate screen, released on drop.
 pub struct Guard {
+    terminal: PlatformTerminal,
     tty: File,
-    restoration: Arc<Restoration>,
+    cleanup: Arc<Cleanup>,
     capabilities: TerminalCapabilities,
-}
-
-struct Restoration {
-    tty: File,
-    cleanup: Cleanup,
-}
-
-impl Restoration {
-    fn restore(&self) -> io::Result<()> {
-        self.cleanup.restore(&mut &self.tty, disable_raw_mode)
-    }
+    /// What keyboard negotiation read that was not a reply.
+    pending: VecDeque<Event>,
 }
 
 /// Shared by the panic hook and guard, without a lock that a panic could
@@ -92,41 +86,36 @@ impl Guard {
             Ok(tty) if tty.is_terminal() => tty,
             _ => return Ok(None),
         };
-
-        let out = tty.try_clone()?;
-        let restoration = Arc::new(Restoration {
-            tty: out,
-            cleanup: Cleanup::default(),
-        });
         let mut guard = Self {
+            terminal: PlatformTerminal::new()?,
             tty,
-            restoration,
+            cleanup: Arc::default(),
             capabilities: TerminalCapabilities::default(),
+            pending: VecDeque::new(),
         };
         // Construct the guard before raw mode. No fallible operation may
         // intervene between entering raw mode and arming restoration.
-        enable_raw_mode()?;
-        guard
-            .restoration
-            .cleanup
-            .active
-            .store(true, Ordering::Release);
+        guard.terminal.enter_raw_mode()?;
+        guard.cleanup.active.store(true, Ordering::Release);
 
-        let restore_on_panic = Arc::clone(&guard.restoration);
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let _ = restore_on_panic.restore();
-            previous(info);
-        }));
+        // termina runs this on a handle of its own, then restores the
+        // terminal's modes itself, then calls the previous hook.
+        let cleanup = Arc::clone(&guard.cleanup);
+        guard.terminal.set_panic_hook(move |out| {
+            let _ = cleanup.restore(out, || Ok(()));
+        });
 
         guard.tty.write_all(ansi::ENTER.as_bytes())?;
         guard.tty.flush()?;
         let legacy =
             std::env::var_os("LEM_RATATUI_KEYBOARD").is_some_and(|value| value == "legacy");
+        let mut events = guard.terminal.event_reader();
         guard.capabilities = keyboard::negotiate(
             &mut guard.tty,
-            &guard.restoration.cleanup.keyboard_pushed,
+            &guard.cleanup.keyboard_pushed,
             legacy,
+            &mut events,
+            &mut guard.pending,
         );
 
         Ok(Some(guard))
@@ -141,11 +130,30 @@ impl Guard {
     pub fn capabilities(&self) -> TerminalCapabilities {
         self.capabilities
     }
+
+    /// The terminal's size in cells: columns, then rows.
+    pub fn size(&self) -> io::Result<(u16, u16)> {
+        let size = self.terminal.get_dimensions()?;
+        Ok((size.cols, size.rows))
+    }
+
+    /// The main loop's input: what negotiation set aside, then the
+    /// terminal's events, decoded as negotiation settled. Take it once.
+    pub fn input(&mut self) -> Input<EventReader> {
+        Input::new(
+            self.terminal.event_reader(),
+            std::mem::take(&mut self.pending),
+            keyboard::encoding(&self.capabilities),
+        )
+    }
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let _ = self.restoration.restore();
+        let terminal = &mut self.terminal;
+        let _ = self
+            .cleanup
+            .restore(&mut self.tty, || terminal.enter_cooked_mode());
     }
 }
 
