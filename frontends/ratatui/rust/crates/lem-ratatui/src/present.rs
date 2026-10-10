@@ -19,13 +19,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, Write};
 
 use lem_protocols::display::v1::{CursorShape, UnderlineStyle};
-use ratatui_core::buffer::Cell;
 use ratatui_core::layout::Position;
 use ratatui_core::style::{Color, Modifier};
-use unicode_width::UnicodeWidthStr;
 
 use crate::ansi::{self, Sgr};
-use crate::paint::{Layer, Link};
+use crate::paint::{Layer, Link, cell_width};
 
 /// Writes frames to the terminal, each as the difference from the last.
 pub struct Presenter<W: Write> {
@@ -173,11 +171,6 @@ impl<W: Write> Presenter<W> {
             Some(UnderlineStyle::Double) => Sgr::DoubleUnderlined,
         }
     }
-}
-
-/// How many columns a cell's symbol takes: 1 at least, 2 for a wide one.
-fn cell_width(cell: &Cell) -> u16 {
-    u16::try_from(cell.symbol().width()).unwrap_or(1).max(1)
 }
 
 /// Open a hyperlink to `link`, or close the one open (OSC 8).
@@ -401,6 +394,86 @@ mod tests {
             !out.contains("\x1b[1;2H"),
             "no write into its second column: {out:?}"
         );
+    }
+
+    #[test]
+    fn a_cell_written_over_half_of_a_halfwidth_voiced_kana_is_drawn() {
+        for kana in ["ｶﾞ", "ﾊﾟ"] {
+            let mut presenter = Presenter::new(Vec::new(), true);
+            let mut first = Layer::new(4, 1);
+            first.put(0, 0, kana, 2, Paint::default());
+            written(&mut presenter, &first);
+
+            let mut second = first.clone();
+            second.put(1, 0, "X", 1, Paint::default());
+            let out = written(&mut presenter, &second);
+            assert!(out.contains('X'), "replacement over {kana:?}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn a_popup_over_wide_text_is_fully_written_and_removal_restores_the_text() {
+        use crate::views::{Registry, View};
+        use lem_protocols::display::v1::{BorderShape, ViewKind};
+
+        let mut registry = Registry::default();
+        let tile = View {
+            id: 1,
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 1,
+            kind: ViewKind::Tile,
+            modeline: false,
+            border: 0,
+            border_shape: BorderShape::None,
+        };
+        registry.insert(tile.clone());
+        registry
+            .get_mut(1)
+            .unwrap()
+            .body
+            .put(0, 0, "你好界", 6, Paint::default());
+        let mut screen = Layer::new(6, 1);
+        registry.composite(&mut screen);
+        let mut presenter = Presenter::new(Vec::new(), true);
+        let out = written(&mut presenter, &screen);
+        assert!(out.contains("你好界"), "{out:?}");
+
+        registry.insert(View {
+            id: 2,
+            x: 1,
+            width: 2,
+            kind: ViewKind::Floating,
+            ..tile
+        });
+        registry
+            .get_mut(2)
+            .unwrap()
+            .body
+            .put(0, 0, "XX", 2, Paint::default());
+        let mut overlay = Layer::new(6, 1);
+        registry.composite(&mut overlay);
+        let out = written(&mut presenter, &overlay);
+        assert!(
+            out.contains(" XX"),
+            "both popup cells and the exposed leading fragment: {out:?}"
+        );
+        assert!(
+            !out.contains("界"),
+            "unaffected glyph is not redrawn: {out:?}"
+        );
+
+        registry.remove(2);
+        let mut restored = Layer::new(6, 1);
+        registry.composite(&mut restored);
+        assert_eq!(restored, screen);
+        let out = written(&mut presenter, &restored);
+        assert!(
+            out.contains("你好"),
+            "underlying wide glyphs return: {out:?}"
+        );
+        assert!(!out.contains("X"), "{out:?}");
     }
 
     #[test]
