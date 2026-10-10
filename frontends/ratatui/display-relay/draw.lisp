@@ -130,6 +130,34 @@ out the right-hand side of a modeline."
         :do (decf x (object-width object))
         :append (draw-at object x y view)))
 
+(defun clip-modeline-put (put width)
+  "The part of PUT inside WIDTH cells, or NIL if it is entirely outside.
+
+Keep the original layout: clipping a right-aligned run reveals its suffix,
+not a repositioned prefix. A wide character crossing either edge becomes
+spaces in its visible cells, retaining the run's style. Protocol run
+coordinates are unsigned, so this must happen before encoding the frame."
+  (let* ((x (text-put-x put))
+         (start (max 0 (- x)))
+         (end (min (text-put-width put) (- width x))))
+    (when (< start end)
+      (if (and (zerop start) (= end (text-put-width put)))
+          put
+          (make-text-put
+           :view (text-put-view put) :x (+ x start) :y (text-put-y put)
+           :width (- end start) :style (text-put-style put) :link (text-put-link put)
+           :text (with-output-to-string (out)
+                   (loop :for char :across (text-put-text put)
+                         :for column := 0 :then next
+                         :for next := (lem:char-width char column)
+                         :for visible := (- (min next end) (max column start))
+                         :while (< column end)
+                         :when (plusp visible)
+                           :do (if (and (<= start column) (<= next end))
+                                   (write-char char out)
+                                   (dotimes (i visible)
+                                     (write-char #\Space out))))))))))
+
 (defun render-line (session view x y objects)
   "Queue row Y of VIEW: blanked from column X, then OBJECTS drawn from X."
   (add-op session (make-line-cleared :view (view-id view) :x x :y y))
@@ -144,12 +172,15 @@ the right."
     (add-op session
             (make-modeline-painted
              :view (view-id view)
-             :puts (append (list (put view 0 0 (make-string width :initial-element #\Space)
-                                      (attribute-style
-                                       (lem:ensure-attribute default-attribute nil))
-                                      width))
-                           (line-puts view 0 0 left-objects)
-                           (line-puts-from-behind view 0 right-objects))))))
+             :puts (loop :for put :in
+                             (append (list (put view 0 0 (make-string width :initial-element #\Space)
+                                                (attribute-style
+                                                 (lem:ensure-attribute default-attribute nil))
+                                                width))
+                                     (line-puts view 0 0 left-objects)
+                                     (line-puts-from-behind view 0 right-objects))
+                         :for clipped := (clip-modeline-put put width)
+                         :when clipped :collect clipped)))))
 
 (defun clear-to-end-of-window (session view y)
   "Queue VIEW blanked from row Y down.

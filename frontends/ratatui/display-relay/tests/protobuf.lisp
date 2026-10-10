@@ -5,6 +5,9 @@
                     (:framing :lem-ipc-channels)
                     (:codec :lem-display-relay/protobuf/codec)
                     (:serve :lem-display-relay/protobuf/serve)
+                    (:draw :lem-display-relay/draw)
+                    (:view :lem-display-relay/view)
+                    (:display :lem-core/display)
                     (:relay :lem-display-relay/relay)))
 (in-package :lem-display-relay/tests/protobuf)
 
@@ -77,6 +80,43 @@
       (ok (pb:put.has-link (first puts)))
       (ok (equal "https://example.com" (pb:put.link (first puts))))
       (ng (pb:put.has-link (second puts)) "unset, not empty"))))
+
+(deftest narrow-modelines-roundtrip-with-only-visible-unsigned-runs
+  (dolist (width '(0 1 15))
+    (let* ((session (make-session :suppress nil))
+           (attribute (lem:make-attribute :foreground "#AABBCC" :bold t))
+           (text (make-instance 'display:text-object :type nil :attribute attribute
+                                :string "abcdefghijklmnop日本")))
+      (draw:render-line-on-modeline session
+                                    (view:make-view :id 7 :x 0 :y 0
+                                                    :width width :height 5 :kind :tile)
+                                    (list text) (list text text) nil)
+      ;; Exercise pb:make-run and the actual wire encoding: merely checking
+      ;; relay ops would not catch the original unsigned-coordinate failure.
+      (let* ((frame (pb:to-display.frame
+                     (to-display (codec:encode (finish-frame session nil)
+                                               (codec:make-codec-state) 1))))
+             (runs (pb:modeline-painted.runs
+                    (pb:op.modeline-painted (first (pb:frame.ops frame))))))
+        (if (zerop width)
+            (ok (null runs))
+            (progn
+              (ok (= 3 (length runs)) "blank, left prefix, right suffix")
+              (ok (equal (if (= width 1)
+                             '(" " "a" " ")
+                             '("               " "abcdefghijklmno" "fghijklmnop日本"))
+                         (mapcar #'pb:run.text runs)))
+              (ok (every (lambda (run)
+                           (and (<= 0 (pb:run.x run))
+                                (plusp (pb:run.width run))
+                                (<= (+ (pb:run.x run) (pb:run.width run)) width)
+                                (= (lem:string-width (pb:run.text run))
+                                   (pb:run.width run))))
+                         runs))
+              (ok (= (pb:run.style (second runs)) (pb:run.style (third runs))))
+              (let ((style (first (pb:frame.styles frame))))
+                (ok (= #xAABBCC (pb:style.foreground style)))
+                (ok (pb:style.bold style)))))))))
 
 (deftest a-style-is-defined-once-and-referred-to-by-id
   (let* ((state (codec:make-codec-state))

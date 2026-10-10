@@ -178,3 +178,63 @@ on T, so this proves the same thing."))
       (ok (= 20 (text-put-width (first puts))) "blanked across the width")
       (ok (eql #x404040 (style-background (text-put-style (first puts)))))
       (ok (equal '(0 0 18 14) (mapcar #'text-put-x puts)) "right side laid out leftwards"))))
+
+(defun modeline-puts (width left right &optional default-attribute)
+  (let ((session (make-session :suppress nil)))
+    (render-line-on-modeline session (a-view :width width) left right default-attribute)
+    (modeline-painted-puts (first (queued session)))))
+
+(defun run-cells (puts)
+  (mapcar (lambda (put)
+            (list (text-put-x put) (text-put-text put) (text-put-width put)))
+          puts))
+
+(deftest a-narrow-modeline-clips-both-sides-without-changing-the-layout
+  (let ((puts (modeline-puts 15
+                             (list (text "abcdefghijklmnopqrst") (text "hidden"))
+                             (list (text "abcdefghijklmnopqrst")))))
+    (ok (equal '((0 "               " 15)
+                 (0 "abcdefghijklmno" 15)
+                 (0 "fghijklmnopqrst" 15))
+               (run-cells puts))
+        "left keeps its prefix, right its suffix and still paints last"))
+  (ok (equal '((0 "               " 15)
+               (13 "L1" 2)
+               (0 "cdefghijklmno" 13))
+             (run-cells (modeline-puts 15 nil
+                                      (list (text "L1")
+                                            (text "abcdefghijklmno")
+                                            (text "hidden")))))
+      "right objects keep their positions even when preceding objects are clipped"))
+
+(deftest partially-visible-wide-modeline-characters-become-spaces
+  (ok (equal '((0 "     " 5) (0 "日本 " 5) (0 " 本語" 5))
+             (run-cells (modeline-puts 5 (list (text "日本語"))
+                                      (list (text "日本語"))))))
+  (ok (equal '((0 " " 1) (0 " " 1) (0 " " 1))
+             (run-cells (modeline-puts 1 (list (text "日"))
+                                      (list (text "本"))))))
+  (ok (equal '((0 "    " 4) (0 "日本" 4) (0 "本語" 4))
+             (run-cells (modeline-puts 4 (list (text "日本語"))
+                                      (list (text "日本語")))))
+      "whole characters remain unchanged"))
+
+(deftest empty-modelines-have-no-runs
+  (ok (null (modeline-puts 0 (list (text "left")) (list (text "日本")))))
+  (ok (equal '((0 " " 1) (0 "a" 1) (0 "z" 1))
+             (run-cells (modeline-puts 1 (list (text "ab") (text ""))
+                                      (list (text "yz") (text "")))))))
+
+(deftest clipped-modeline-text-keeps-its-style-and-link
+  (let* ((attribute (lem:make-attribute :foreground "#AABBCC" :background "#112233"
+                                       :bold t :underline t :link "https://example.com"))
+         (puts (rest (modeline-puts 1 (list (text "日" attribute))
+                                    (list (text "本" attribute))))))
+    (ok (= 2 (length puts)))
+    (dolist (put puts)
+      (ok (equal " " (text-put-text put)))
+      (ok (eql #xAABBCC (style-foreground (text-put-style put))))
+      (ok (eql #x112233 (style-background (text-put-style put))))
+      (ok (style-bold (text-put-style put)))
+      (ok (style-underline (text-put-style put)))
+      (ok (equal "https://example.com" (text-put-link put))))))
