@@ -7,8 +7,9 @@ Defaults to the Rust debug display. Needs only Python's standard library,
 does not start Lem or read its personal configuration, and never touches the
 caller's terminal. The child's stdin/stdout are protocol pipes; its controlling
 PTY supplies terminal replies and keys. No generated files are needed.
-It also checks that a terminal hang-up ends the display, and that input
-which never completes an escape sequence does not hold up the protocol.
+It also checks that a terminal hang-up ends the display, that input
+which never completes an escape sequence does not hold up the protocol,
+and that an editor crash report restores the terminal and exits non-zero.
 """
 
 import argparse
@@ -106,6 +107,15 @@ def key_description(payload):
 
 def text_key(text, modifiers=(), keypad=False):
     return (1, text, tuple(modifiers), keypad)
+
+
+def encode_varint(value):
+    result = bytearray()
+    while value >= 0x80:
+        result.append((value & 0x7f) | 0x80)
+        value >>= 7
+    result.append(value)
+    return bytes(result)
 
 
 class Session:
@@ -251,14 +261,19 @@ class Session:
         assert set(capabilities) <= {1, 2, 3}, "unexpected capability fields"
         return tuple(bool(single(capabilities, field, 0)) for field in (1, 2, 3))
 
-    def exit(self):
-        # ToDisplay(seq=1, exit=Exit()) in standard delimited protobuf.
-        self.child.stdin.write(b"\x04\x08\x01\x3a\x00")
+    def exit(self, reason=""):
+        # ToDisplay(seq=1, exit=Exit(reason)) in delimited protobuf.
+        encoded = reason.encode("utf-8")
+        exit_message = b"\x0a" + encode_varint(len(encoded)) + encoded if reason else b""
+        message = b"\x08\x01\x3a" + encode_varint(len(exit_message)) + exit_message
+        self.child.stdin.write(encode_varint(len(message)) + message)
         self.child.stdin.flush()
         self.until(lambda: self.child.poll() is not None)
         while select.select(list(self.readers), [], [], 0)[0]:
             self.pump(0)
-        assert self.child.returncode == 0, self.stderr.decode(errors="replace")
+        assert self.child.returncode == (1 if reason else 0), self.stderr.decode(errors="replace")
+        if reason:
+            assert encoded in self.stderr, "crash report was not printed"
         assert not self.wire, f"truncated or polluted protocol stdout: {self.wire!r}"
         assert termios.tcgetattr(self.slave) == self.before, "terminal modes not restored"
         assert self.terminal.count(LEAVE_SCREEN) == 1, "alternate screen not restored exactly once"
@@ -361,6 +376,17 @@ def run_stall(binary):
         session.close()
 
 
+def run_crash(binary):
+    session = Session(binary, "enhanced")
+    try:
+        session.hello()
+        session.exit("acceptance: deliberate editor crash")
+        assert session.terminal.count(POP) == 1, "crash did not pop keyboard flags once"
+        print("PASS crash: report printed, status 1, terminal restored")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", type=Path,
@@ -375,7 +401,8 @@ def main():
         run_case(binary, mode)
     run_hangup(binary)
     run_stall(binary)
-    print("10/10 keyboard acceptance checks passed")
+    run_crash(binary)
+    print("11/11 keyboard acceptance checks passed")
 
 
 if __name__ == "__main__":

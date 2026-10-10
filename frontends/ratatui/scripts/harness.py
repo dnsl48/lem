@@ -8,7 +8,8 @@ import os, pty, select, time, re, fcntl, termios, struct, signal, subprocess, sy
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 BIN = f"{REPO}/frontends/ratatui/rust/target/release/lem-ratatui-launcher"
 LISP = f"{REPO}/frontends/ratatui/dist/lem-ratatui-lisp"
-ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/", TERM="xterm-256color", LEM_RATATUI_LISP=LISP)
+ENV = dict(os.environ, LEM_HOME="/tmp/lem-scratch/",
+           TERM="xterm-256color", LEM_RATATUI_LISP=LISP)
 
 class Session:
     """The launcher in a pty, answering what a terminal answers.
@@ -17,11 +18,12 @@ class Session:
     `colors=(fg, bg)`, as "rrrr/gggg/bbbb" hex, OSC 10 and 11 are too:
     that is how the display learns the terminal's colours (colors.rs).
     """
-    def __init__(self, cols=100, rows=30, colors=None, env=None):
+    def __init__(self, cols=100, rows=30, colors=None, env=None, *, binary=BIN, args=()):
         self.colors = colors
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            os.execve(BIN, [BIN], dict(ENV, **(env or {})))
+            child_env = {k: v for k, v in dict(ENV, **(env or {})).items() if v is not None}
+            os.execve(str(binary), [str(binary), *args], child_env)
         self.winsize(cols, rows)
         self.out = b""
     def winsize(self, c, r):

@@ -196,7 +196,10 @@ writes the terminal's, with OSC 52, and cannot read it.
 When the editor exits, the relay sends `Exit` and the stream ends. The
 reason is empty for a normal exit, or the editor's crash report. The
 display restores the terminal and then prints the reason, so it can be
-read. If the display hangs up instead, the relay's reader sees the end
+read. A non-empty reason makes the display exit with status 1, which the
+launcher propagates; the Lisp frontend also exits with status 1 when it
+returns a crash report. An empty reason is a successful exit.
+If the display hangs up instead, the relay's reader sees the end
 of the stream and Lem's process ends with it.
 
 The terminal guard and panic hook share restoration ownership. Keyboard

@@ -21,7 +21,7 @@ mod bundle;
 
 mod session;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, ExitStatus};
@@ -52,21 +52,27 @@ struct Programs {
 }
 
 impl Programs {
-    /// Each comes from its environment variable when set, then from the
-    /// bundle when there is one. Otherwise the display binary is looked
-    /// for beside this one, which is where Cargo builds it; the Lisp image
-    /// has no such home and must be named.
-    fn locate() -> Result<Self> {
-        let lisp = match env_path("LEM_RATATUI_LISP") {
-            Some(path) => path,
+    /// Direct CLI commands need only the image, without resolving or
+    /// unpacking either of the other children.
+    fn locate_lisp() -> Result<PathBuf> {
+        match env_path("LEM_RATATUI_LISP") {
+            Some(path) => Ok(path),
             #[cfg(feature = "bundle")]
-            None => bundle::lisp()?,
+            None => bundle::lisp(),
             #[cfg(not(feature = "bundle"))]
             None => anyhow::bail!(
                 "no Lisp image: set LEM_RATATUI_LISP \
                  (`make lisp` in frontends/ratatui builds dist/lem-ratatui-lisp)"
             ),
-        };
+        }
+    }
+
+    /// Each comes from its environment variable when set, then from the
+    /// bundle when there is one. Otherwise the display binary is looked
+    /// for beside this one, which is where Cargo builds it; the Lisp image
+    /// has no such home and must be named.
+    fn locate() -> Result<Self> {
+        let lisp = Self::locate_lisp()?;
         let terminal = match env_path("LEM_RATATUI_TERMINAL") {
             Some(path) => path,
             #[cfg(feature = "bundle")]
@@ -100,6 +106,52 @@ fn env_path(var: &str) -> Option<PathBuf> {
     std::env::var_os(var)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
+}
+
+/// Match `lem:parse-args` when deciding whether to start a display. It
+/// scans options even after filenames and treats `--` as a filename,
+/// while option operands (even ones spelled `--help`) are consumed.
+/// Help, version and missing required operands go directly to the image.
+fn direct_cli(args: &[OsString]) -> bool {
+    let mut args = args.iter();
+    let mut requested = false;
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("-h" | "--help" | "-v" | "--version") => requested = true,
+            Some("-i" | "--interface" | "--log-filename") => {
+                if args.next().is_none() {
+                    return true;
+                }
+            }
+            // Lem accepts a missing eval operand, unlike the options above.
+            Some("-e" | "--eval") => {
+                args.next();
+            }
+            _ => {}
+        }
+    }
+    requested
+}
+
+/// SBCL's saved executable must leave all user options to Lem itself.
+fn lisp_args(args: &[OsString]) -> impl Iterator<Item = &OsStr> {
+    std::iter::once(OsStr::new("--end-runtime-options")).chain(args.iter().map(OsString::as_os_str))
+}
+
+/// No session, pipes or auxiliary children: Lem owns CLI output and errors.
+fn run_direct_cli(lisp: &Path, args: &[OsString]) -> Result<ExitCode> {
+    let status = duct::cmd(lisp, lisp_args(args))
+        // A nested invocation does not belong to its caller's session.
+        .env_remove("LEM_SESSION_ID")
+        .unchecked()
+        .run()
+        .with_context(|| format!("running {}", lisp.display()))?
+        .status;
+    Ok(if status.success() {
+        ExitCode::SUCCESS
+    } else {
+        code(status)
+    })
 }
 
 /// How the session ended.
@@ -245,7 +297,7 @@ fn run_both(
     pipes: Pipes,
     warnings: &mut Vec<String>,
 ) -> Result<(ExitStatus, Option<ExitStatus>)> {
-    let mut lem = duct::cmd(&programs.lisp, args).env("LEM_SESSION_ID", session);
+    let mut lem = duct::cmd(&programs.lisp, lisp_args(args)).env("LEM_SESSION_ID", session);
     // Lem must see the socket of *this* session's agent, and none at all
     // when there is none — never one inherited from the launcher's own
     // environment (e.g. a nested `lem-ratatui`, started from inside a
@@ -366,22 +418,32 @@ fn report(ended: &Ended) -> ExitCode {
     for warning in &ended.warnings {
         eprintln!("lem-ratatui: {warning}");
     }
+    // A fatal editor report also fails the display. Prefer the originating
+    // Lem exit and its log; signals still fall behind a display failure.
+    if let Some(lem) = ended
+        .lem
+        .filter(|lem| lem.code().is_some_and(|code| code != 0))
+    {
+        return report_lem_failure(lem, ended.lem_log.as_deref());
+    }
     if !ended.display.success() {
         eprintln!("lem-ratatui: the display exited with {}", ended.display);
         return code(ended.display);
     }
     match ended.lem {
-        Some(lem) if !lem.success() => {
-            match &ended.lem_log {
-                Some(log) => eprintln!("lem-ratatui: Lem exited with {lem}; see {}", log.display()),
-                None => eprintln!("lem-ratatui: Lem exited with {lem}"),
-            }
-            code(lem)
-        }
+        Some(lem) if !lem.success() => report_lem_failure(lem, ended.lem_log.as_deref()),
         // Killed because the display ended the session, which it did
         // successfully.
         Some(_) | None => ExitCode::SUCCESS,
     }
+}
+
+fn report_lem_failure(lem: ExitStatus, log: Option<&Path>) -> ExitCode {
+    match log {
+        Some(log) => eprintln!("lem-ratatui: Lem exited with {lem}; see {}", log.display()),
+        None => eprintln!("lem-ratatui: Lem exited with {lem}"),
+    }
+    code(lem)
 }
 
 /// The exit code to pass on for `status`, which on Unix has none when a
@@ -395,9 +457,12 @@ fn code(status: ExitStatus) -> ExitCode {
 }
 
 fn main() -> Result<ExitCode> {
-    let programs = Programs::locate()?;
     // The command line belongs to Lem: files to open, `--eval`, ...
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if direct_cli(&args) {
+        return run_direct_cli(&Programs::locate_lisp()?, &args);
+    }
+    let programs = Programs::locate()?;
     let ended = run(&programs, &args)?;
     Ok(report(&ended))
 }
