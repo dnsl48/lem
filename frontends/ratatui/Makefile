@@ -63,6 +63,8 @@ WITH_TOOLCHAIN := PATH="$(TOOLCHAIN)/bin:$$PATH"
 LISP_SOURCES := $(HERE)/build.lisp $(HERE)/lem-ratatui.asd \
 	$(shell find $(HERE)/lisp $(HERE)/display-relay $(HERE)/ipc-channels $(HERE)/os-agent $(ROOT)/src $(ROOT)/extensions \
 		-name '*.lisp' -o -name '*.asd')
+# Both links' generated definitions are saved in the Lisp image.
+PROTO_SOURCES := $(shell find $(HERE)/proto -name '*.proto')
 
 .PHONY: all lisp rust dist run test test-rust test-lisp toolchain clean distclean
 
@@ -76,7 +78,7 @@ $(QLOT_SETUP): $(ROOT)/qlfile.lock
 	cd $(ROOT) && qlot install
 	touch $@
 
-$(LISP_BIN): $(QLOT_SETUP) $(LISP_SOURCES) $(CL_PROTOBUFS_STAMP) | $(PROTOC) $(PROTOC_PLUGIN)
+$(LISP_BIN): $(QLOT_SETUP) $(LISP_SOURCES) $(PROTO_SOURCES) $(CL_PROTOBUFS_STAMP) | $(PROTOC) $(PROTOC_PLUGIN)
 	cd $(ROOT) && $(WITH_TOOLCHAIN) $(LISP) --load .qlot/setup.lisp --load frontends/ratatui/build.lisp
 
 # cargo tracks its own inputs, so always hand over to it.

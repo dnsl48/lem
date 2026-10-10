@@ -161,9 +161,9 @@ Every build output lands in `frontends/ratatui/dist/`, except the Rust
 binaries of a development build, which stay in `rust/target/release/`.
 The script `dist/lem-ratatui-dev` runs the launcher from there against the
 image beside it, so it can be symlinked onto `PATH`; the launcher finds
-the display beside itself. The Lisp image is rebuilt only when a
-Lisp source under `src/`, `extensions/` or this frontend changes;
-`make -B` forces it.
+the display beside itself. The Lisp image is rebuilt when a Lisp source
+under `src/`, `extensions/` or this frontend changes, or when either
+protobuf schema under `proto/` changes; `make -B` forces it.
 
 By hand, from the repo root:
 
