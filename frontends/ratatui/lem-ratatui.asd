@@ -14,4 +14,11 @@
                (:file "clipboard")
                (:file "transport")
                (:file "links")
-               (:file "main")))
+               (:file "main"))
+  :in-order-to ((test-op (test-op "lem-ratatui/tests"))))
+
+(defsystem "lem-ratatui/tests"
+  :depends-on ("lem-ratatui" "rove")
+  :pathname "lisp/tests/"
+  :components ((:file "main"))
+  :perform (test-op (o c) (symbol-call :rove '#:run c)))

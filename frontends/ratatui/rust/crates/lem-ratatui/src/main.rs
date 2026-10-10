@@ -24,6 +24,7 @@ mod transport;
 mod views;
 
 use std::io::BufWriter;
+use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -66,7 +67,7 @@ fn session_id(from_launcher: Option<String>) -> String {
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string())
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     let started = Instant::now();
 
     // Asked before the terminal is taken over and before termina reads
@@ -177,7 +178,7 @@ fn main() -> Result<()> {
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     report(frames, &metrics);
-                    return Ok(());
+                    return Ok(ExitCode::SUCCESS);
                 }
             };
             let transport::Received {
@@ -195,7 +196,7 @@ fn main() -> Result<()> {
                         // frame would have painted and stop.
                         eprintln!("lem-ratatui: {} views composited", screen.views.len());
                         eprintln!("lem-ratatui: {}", metrics.report());
-                        return Ok(());
+                        return Ok(ExitCode::SUCCESS);
                     };
                     let mut layer = Layer::new(width, height);
                     screen.render_into(&mut layer);
@@ -223,7 +224,11 @@ fn main() -> Result<()> {
                         eprintln!("lem-ratatui: {}", exit.reason);
                     }
                     report(frames, &metrics);
-                    return Ok(());
+                    return Ok(if exit.reason.is_empty() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::FAILURE
+                    });
                 }
                 Some(to_display::Message::Welcome(_)) | None => {}
             }

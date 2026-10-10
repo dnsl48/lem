@@ -14,7 +14,7 @@ that reason.
 """
 import os, re, shutil, signal, sys, tempfile
 
-from harness import REPO, Session, edit
+from harness import ENV, REPO, Session, edit
 
 results = []
 def check(n, desc, ok, detail=""):
@@ -124,7 +124,7 @@ s.kill()
 # relay logs what Hello carried. A terminal that answers only DA1 must
 # cost no wait: the display then knows at once that colours are not coming.
 def logged_colours():
-    log = os.path.join(os.environ.get("LEM_HOME", "/tmp/lem-scratch/"), "debug.log")
+    log = os.path.join(ENV["LEM_HOME"], "debug.log")
     try:
         lines = [l for l in open(log, errors="replace") if "terminal colours" in l]
     except FileNotFoundError:

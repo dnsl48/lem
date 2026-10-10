@@ -118,6 +118,7 @@ test-lisp: $(QLOT_SETUP) $(CL_PROTOBUFS_STAMP) | $(PROTOC) $(PROTOC_PLUGIN)
 	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/ipc-channels/lem-ipc-channels.asd
 	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/display-relay/lem-display-relay.asd
 	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/os-agent/lem-os-agent.asd
+	cd $(ROOT) && $(WITH_TOOLCHAIN) .qlot/bin/rove frontends/ratatui/lem-ratatui.asd
 
 toolchain: $(CL_PROTOBUFS_STAMP) $(PROTOC) $(PROTOC_PLUGIN)
 

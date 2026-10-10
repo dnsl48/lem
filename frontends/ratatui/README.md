@@ -183,6 +183,21 @@ image and `LEM_RATATUI_TERMINAL` the display binary, and
 the launcher says so and carries on); `make dist`'s binary falls back to
 the ones embedded in it.
 
+`--help` (`-h`) and `--version` (`-v`) print Lem's information to stdout
+and exit without starting the terminal display or OS agent. These work
+without a TTY. Arguments are fenced from SBCL's runtime-option parser,
+so the saved image receives Lem's options intact.
+Missing operands for `-i`, `--interface` or `--log-filename` also bypass
+the display and OS agent: Lem prints its diagnostic to stderr and exits
+with status 2. The saved Lisp image refuses to start protocol mode when
+stdout is a TTY; help, version and argument diagnostics remain available.
+When `LEM_SESSION_ID` is present, even with an empty value, the image treats
+the invocation as a protocol session and rejects help and version with a
+stderr diagnostic and status 2, leaving protocol stdout empty. Parse errors take
+precedence over that guard. The launcher removes an inherited session id
+for direct requests, so help and version also work when called from an
+existing Lem session; a new protocol session receives a fresh id.
+
 At startup the display asks the terminal for its default colours
 (OSC 10/11, through `terminal-colorsaurus`) and passes them on in
 `Hello`: Lem judges light or dark mode by them for any theme that does
@@ -201,7 +216,9 @@ launcher's state directory (`$XDG_STATE_HOME/lem-ratatui/`, else
 `$HOME/.local/state/lem-ratatui/`): Lem's stderr in
 `lem-<session-id>.log`, the OS agent's in `os-agent-<session-id>.log`.
 The newest ten sessions' logs are kept. If Lem dies or exits non-zero the
-launcher says so, names its log, and exits non-zero.
+launcher says so, names its log when available, and exits non-zero. An
+editor crash report also makes both the Lisp process and the display exit
+with status 1; the display restores the terminal before printing it.
 
 When the editor seems stuck, `kill -USR1 <pid>` (the
 `lem-ratatui-lisp` process) writes every thread's backtrace to that
@@ -340,6 +357,8 @@ on the wire.
 
 ```bash
 python3 scripts/acceptance.py      # needs `make` to have run; 17 checks
+python3 scripts/regression-acceptance.py  # narrow panes, crashes and CLI output
+python3 scripts/regression-acceptance.py --bundle  # needs `make dist`
 ```
 
 ## Next steps
@@ -452,8 +471,9 @@ python3 scripts/keyboard-acceptance.py
 ```
 
 These use isolated PTYs and protocol pipes. They verify negotiation,
-fallback, queued keys, restoration, a terminal hang-up and unfinished
-input without opening Lem or changing a personal configuration.
+fallback, queued keys, restoration, a terminal hang-up, unfinished input
+and an editor crash report's non-zero exit and terminal restoration,
+without opening Lem or changing a personal configuration.
 Physical gestures still need checking in the terminal and keyboard
 layout in use.
 
