@@ -4,9 +4,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lem_protocols::display::v1::{self, UnderlineStyle};
-use ratatui_core::buffer::Buffer;
+use ratatui_core::buffer::{Buffer, Cell};
 use ratatui_core::layout::Rect;
 use ratatui_core::style::{Color, Modifier, Style};
+
+/// How many columns a cell's symbol takes, counting blanks as one.
+pub(crate) fn cell_width(cell: &Cell) -> u16 {
+    ratatui_core::buffer::CellWidth::cell_width(cell).max(1)
+}
 
 /// A packed `0xRRGGBB`.
 pub fn color(rgb: u32) -> Color {
@@ -154,10 +159,60 @@ impl Layer {
         self.link.set(x, y, source.link.get(sx, sy).clone());
     }
 
+    /// Blank a glyph (or its visible prefix) in its foreground/background.
+    /// Continuation cells have no style of their own, so use the leader's
+    /// colours throughout. Fragments are no longer decorated or linked.
+    pub(crate) fn blank_glyph(&mut self, x: u16, y: u16, width: u16) {
+        let cell = &self.cells[(x, y)];
+        let (fg, bg) = (cell.fg, cell.bg);
+        self.blank_coloured(x, y, width, fg, bg);
+    }
+
+    fn blank_coloured(&mut self, x: u16, y: u16, width: u16, fg: Color, bg: Color) {
+        for cx in x..x.saturating_add(width).min(self.area().width) {
+            self.reset(cx, y);
+            self.cells[(cx, y)].set_fg(fg).set_bg(bg);
+        }
+    }
+
+    /// Blank exposed fragments of glyphs cut by a span about to be replaced.
+    /// A wide leader outside the span would otherwise hide its new first
+    /// cell from Ratatui's diff. Prepare a whole span once, before copying
+    /// any cells, so its continuation cells cannot erase a new leader.
+    pub(crate) fn prepare_overwrite(&mut self, x: u16, y: u16, width: u16) {
+        let area = self.area();
+        if y >= area.height || x >= area.width || width == 0 {
+            return;
+        }
+        let end = x.saturating_add(width).min(area.width);
+        let mut cx = 0;
+        while cx < end {
+            let glyph_width = cell_width(&self.cells[(cx, y)]);
+            let next = cx.saturating_add(glyph_width);
+            if next > x && (cx < x || next > end) {
+                let cell = &self.cells[(cx, y)];
+                let (fg, bg) = (cell.fg, cell.bg);
+                if cx < x {
+                    self.blank_coloured(cx, y, x - cx, fg, bg);
+                }
+                if next > end {
+                    self.blank_coloured(end, y, next - end, fg, bg);
+                }
+            }
+            cx = next;
+        }
+    }
+
     /// Set the symbol of cell (`x`, `y`), which is no longer part of any
     /// link: a border or separator drawn over text.
     pub fn set_symbol(&mut self, x: u16, y: u16, symbol: &str) {
-        self.cells[(x, y)].set_symbol(symbol);
+        self.prepare_overwrite(x, y, 1);
+        let cell = &mut self.cells[(x, y)];
+        cell.set_symbol(symbol);
+        cell.modifier
+            .remove(Modifier::UNDERLINED | Modifier::CROSSED_OUT);
+        cell.underline_color = Color::Reset;
+        self.underline.set(x, y, UnderlineStyle::Straight);
         self.link.set(x, y, None);
     }
 
@@ -194,6 +249,7 @@ impl Layer {
         if y >= area.height || x >= area.width {
             return;
         }
+        self.prepare_overwrite(x, y, width);
         let (end, _) = self
             .cells
             .set_stringn(x, y, text, usize::from(width), paint.style);
@@ -220,6 +276,7 @@ impl Layer {
         if y >= area.height {
             return;
         }
+        self.prepare_overwrite(x, y, area.width.saturating_sub(x));
         for cx in x..area.width {
             self.reset(cx, y);
         }
@@ -336,6 +393,85 @@ mod tests {
             "a",
             "the next run starts two cells on"
         );
+    }
+
+    #[test]
+    fn overlapping_modeline_runs_blank_both_partial_wide_glyphs() {
+        let mut layer = Layer::new(6, 1);
+        let linked = link_of("https://example.com");
+        let decorated = Paint {
+            style: Style::default()
+                .fg(Color::Red)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED)
+                .underline_color(Color::Yellow),
+            underline: UnderlineStyle::Curly,
+        };
+        layer.put_linked(0, 0, "你好界", 6, decorated, linked.as_ref());
+        layer.put(1, 0, "XX", 2, plain());
+        for (x, symbol) in [(0, " "), (1, "X"), (2, "X"), (3, " "), (4, "界")] {
+            assert_eq!(layer.cells[(x, 0)].symbol(), symbol, "cell {x}");
+        }
+        for x in [0, 3] {
+            let cell = &layer.cells[(x, 0)];
+            assert_eq!((cell.fg, cell.bg), (Color::Red, Color::Blue));
+            assert!(!cell.modifier.contains(Modifier::UNDERLINED));
+            assert_eq!(cell.underline_color, Color::Reset);
+            assert_eq!(*layer.underline.get(x, 0), UnderlineStyle::Straight);
+            assert_eq!(*layer.link.get(x, 0), None);
+        }
+        assert_eq!(layer.link.get(4, 0), &linked, "uncovered glyph survives");
+    }
+
+    #[test]
+    fn clearing_from_a_continuation_cell_blanks_its_leader() {
+        let mut layer = Layer::new(6, 1);
+        layer.put(0, 0, "你好界", 6, plain());
+        layer.clear_eol(3, 0);
+        assert_eq!(layer.cells[(0, 0)].symbol(), "你");
+        for x in 2..6 {
+            assert_eq!(layer.cells[(x, 0)].symbol(), " ", "cell {x}");
+        }
+    }
+
+    #[test]
+    fn a_border_over_a_wide_glyph_clears_fragments_and_decorations() {
+        let mut layer = Layer::new(4, 1);
+        let link = link_of("https://example.com");
+        let retained = Modifier::ITALIC | Modifier::BOLD | Modifier::REVERSED;
+        let paint = Paint {
+            style: Style::default()
+                .add_modifier(Modifier::UNDERLINED | Modifier::CROSSED_OUT | retained)
+                .underline_color(Color::Yellow),
+            underline: UnderlineStyle::Curly,
+        };
+        layer.put_linked(0, 0, "你好", 4, paint, link.as_ref());
+        layer.set_symbol(1, 0, "│");
+        layer.set_symbol(2, 0, "│");
+        for (x, symbol) in [(0, " "), (1, "│"), (2, "│"), (3, " ")] {
+            assert_eq!(layer.cells[(x, 0)].symbol(), symbol);
+            assert!(
+                !layer.cells[(x, 0)]
+                    .modifier
+                    .intersects(Modifier::UNDERLINED | Modifier::CROSSED_OUT)
+            );
+            assert_eq!(layer.cells[(x, 0)].underline_color, Color::Reset);
+            assert_eq!(*layer.underline.get(x, 0), UnderlineStyle::Straight);
+            assert_eq!(*layer.link.get(x, 0), None);
+        }
+        assert!(layer.cells[(2, 0)].modifier.contains(retained));
+    }
+
+    #[test]
+    fn empty_and_offscreen_writes_leave_wide_glyphs_intact() {
+        let mut layer = Layer::new(4, 1);
+        layer.put(0, 0, "你好", 4, plain());
+        let expected = layer.clone();
+        layer.put(1, 0, "X", 0, plain());
+        layer.put(4, 0, "X", 1, plain());
+        layer.put(1, 1, "X", 1, plain());
+        layer.clear_eol(4, 0);
+        assert_eq!(layer, expected);
     }
 
     #[test]

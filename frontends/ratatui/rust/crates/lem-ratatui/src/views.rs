@@ -9,7 +9,7 @@
 
 use lem_protocols::display::v1::{self, BorderShape, ViewKind};
 
-use crate::paint::Layer;
+use crate::paint::{Layer, cell_width};
 use ratatui_core::layout::Rect;
 
 /// A view: where one Lem window's buffer goes on the screen.
@@ -76,17 +76,27 @@ pub struct Registry {
 /// Copy `source` onto `screen` at (`x`, `y`), clipped to `area`.
 fn blit(screen: &mut Layer, source: &Layer, x: u16, y: u16, area: Rect) {
     let size = source.area();
+    let width = size.width.min(area.width.saturating_sub(x));
+    if width == 0 {
+        return;
+    }
     for sy in 0..size.height {
         let Some(ty) = y.checked_add(sy) else { return };
         if ty >= area.height {
             return;
         }
-        for sx in 0..size.width {
-            let Some(tx) = x.checked_add(sx) else { break };
-            if tx >= area.width {
-                break;
+        screen.prepare_overwrite(x, ty, width);
+        let mut sx = 0;
+        while sx < width {
+            let glyph_width = cell_width(&source.cells[(sx, sy)]);
+            let visible = glyph_width.min(width - sx);
+            for offset in 0..visible {
+                screen.copy_cell(x + sx + offset, ty, source, sx + offset, sy);
             }
-            screen.copy_cell(tx, ty, source, sx, sy);
+            if visible < glyph_width {
+                screen.blank_glyph(x + sx, ty, visible);
+            }
+            sx += visible;
         }
     }
 }
@@ -307,6 +317,8 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paint::{Paint, link_of};
+    use ratatui_core::style::{Color, Modifier, Style};
 
     fn view(id: u32, x: u16, y: u16, w: u16, h: u16, kind: ViewKind) -> View {
         View {
@@ -350,6 +362,91 @@ mod tests {
             "t",
             "below the floating view"
         );
+    }
+
+    #[test]
+    fn floating_views_clear_partial_wide_glyphs_at_both_edges() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 0, 0, 6, 1, ViewKind::Tile));
+        registry
+            .get_mut(1)
+            .unwrap()
+            .body
+            .put(0, 0, "你好界", 6, Paint::default());
+        registry.insert(view(2, 1, 0, 2, 1, ViewKind::Floating));
+        fill(&mut registry, 2, 'X');
+
+        let mut screen = Layer::new(6, 1);
+        registry.composite(&mut screen);
+        for (x, symbol) in [(0, " "), (1, "X"), (2, "X"), (3, " "), (4, "界")] {
+            assert_eq!(screen.cells[(x, 0)].symbol(), symbol, "cell {x}");
+        }
+    }
+
+    #[test]
+    fn a_clipped_source_wide_glyph_becomes_an_unlinked_styled_blank() {
+        let mut registry = Registry::default();
+        registry.insert(view(1, 1, 0, 4, 1, ViewKind::Floating));
+        let link = link_of("https://example.com");
+        let paint = Paint {
+            style: Style::default()
+                .fg(Color::Red)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED),
+            underline: v1::UnderlineStyle::Curly,
+        };
+        registry
+            .get_mut(1)
+            .unwrap()
+            .body
+            .put_linked(0, 0, "你好", 4, paint, link.as_ref());
+
+        let mut screen = Layer::new(4, 1);
+        registry.composite(&mut screen);
+        assert_eq!(
+            screen.cells[(1, 0)].symbol(),
+            "你",
+            "complete glyph copied together"
+        );
+        assert_eq!(
+            screen.cells[(3, 0)].symbol(),
+            " ",
+            "right edge clips the next glyph"
+        );
+        assert_eq!(
+            (screen.cells[(3, 0)].fg, screen.cells[(3, 0)].bg),
+            (Color::Red, Color::Blue)
+        );
+        assert!(!screen.cells[(3, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert_eq!(*screen.underline.get(3, 0), v1::UnderlineStyle::Straight);
+        assert_eq!(*screen.link.get(3, 0), None);
+        assert_eq!(screen.link.get(1, 0), &link);
+    }
+
+    #[test]
+    fn borders_and_split_separators_clear_underlying_wide_glyphs() {
+        for floating_border in [false, true] {
+            let mut registry = Registry::default();
+            registry.insert(view(1, 0, 0, 4, 1, ViewKind::Tile));
+            registry
+                .get_mut(1)
+                .unwrap()
+                .body
+                .put(0, 0, "你好", 4, Paint::default());
+            let mut overlay = view(2, 2, 0, 0, 1, ViewKind::Tile);
+            if floating_border {
+                overlay.kind = ViewKind::Floating;
+                overlay.border = 1;
+                overlay.border_shape = BorderShape::LeftBorder;
+            }
+            registry.insert(overlay);
+
+            let mut screen = Layer::new(4, 1);
+            registry.composite(&mut screen);
+            assert_eq!(screen.cells[(0, 0)].symbol(), " ");
+            assert_eq!(screen.cells[(1, 0)].symbol(), "│");
+            assert_eq!(screen.cells[(2, 0)].symbol(), "好");
+        }
     }
 
     #[test]
