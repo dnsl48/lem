@@ -6,6 +6,21 @@
 **Revises:** [0016](0016-underline-styles.md) (where the underline style
 comes from).
 
+## Upstream status — 2026-10-10
+
+Upstream Lem includes both changes described by this decision:
+
+- [e99762dd](https://github.com/lem-project/lem/commit/e99762dd957ff8b47a970cbd8be7a7f8cd51d5bf)
+  adds italic, strikethrough, dim and underline-style attributes.
+- [2263dba2](https://github.com/lem-project/lem/commit/2263dba2e33c7d6417154a70aeedc8f9e841a2c5)
+  adds the hyperlink attribute.
+
+Both commits are included in this frontend's Lem baseline, so no separate
+core patch is required. Older Lem checkouts need both changes backported.
+The decision remains accepted. References below to carrying patches or
+awaiting upstream acceptance describe the original September 2026 context;
+the original decision and rationale are preserved.
+
 ## Context
 
 0015 kept font styles out of Lem core by carrying them in an attribute's

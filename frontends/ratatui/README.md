@@ -386,11 +386,12 @@ Nothing here is required for the PoC; each is its own piece of work.
 ## Keys and mouse
 
 **Font styles.** Markdown emphasis is drawn in italic. Lem's attributes
-can be italic, struck through or dim, and have an underline style
-([ADR 0017](docs/adr/0017-font-styles-and-links-in-lem-attributes.md), a
-small patch to Lem core carried here until upstream takes it). Give them
-in an attribute's definition or in a theme; to change one defined
-elsewhere, redefine it in `init.lisp`, which a theme load keeps:
+can be italic, struck through or dim, and have an underline style. These
+APIs and the hyperlink attribute are part of upstream Lem. Older checkouts
+need the font-style and hyperlink changes linked in
+[ADR 0017](docs/adr/0017-font-styles-and-links-in-lem-attributes.md).
+Set font styles in an attribute's definition or in a theme; to change one
+defined elsewhere, redefine it in `init.lisp`, which a theme load keeps:
 
 ```lisp
 (lem:define-attribute lem:syntax-comment-attribute
