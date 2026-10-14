@@ -1,0 +1,296 @@
+"""MVP acceptance for the curses frontend: the checks from docs/poc-plan.md,
+plus regression guards added since.
+
+Run from anywhere once both halves are built:
+
+    make -C frontends/curses
+    python3 frontends/curses/scripts/acceptance.py
+
+Assert on effects — disk contents, exit statuses, termios flags — never on
+the terminal byte stream. ratatui diffs per cell, so typed text never
+appears contiguously, and only changed digits of the modeline are
+repainted. Three checks here first reported false failures for exactly
+that reason.
+"""
+import os, re, shutil, signal, sys, tempfile
+
+from harness import ENV, REPO, Session, edit
+
+results = []
+def check(n, desc, ok, detail=""):
+    results.append((n, desc, ok, detail))
+    print(f"{'PASS' if ok else 'FAIL'}  {n}. {desc}" + (f"   [{detail}]" if detail else ""))
+
+# --- 1, 2, 3, 4, 5: one session ------------------------------------------
+s = Session()
+s.pump(8)
+start = s.plain()
+check(1, "startup screen renders with modeline",
+      "Welcome to Lem" in start and "Dashboard" in start,
+      f"{len(s.out)} bytes")
+
+m = s.mark()
+s.send([b"\x18", b"\x06"]); s.pump(1.2)            # C-x C-f
+s.send(f"{REPO}/src/lem.lisp"); s.send([b"\r"]); s.pump(3)
+src = s.plain(m)
+check(2, "C-x C-f opens a Lisp source file",
+      "lem.lisp" in src and ("defpackage" in src or "in-package" in src or "defun" in src),
+      "lem.lisp visible")
+
+colours = set(re.findall(r"\x1b\[38;2;(\d+;\d+;\d+)", s.since(m)))
+check(3, "syntax colours appear", len(colours) >= 4, f"{len(colours)} distinct foreground colours")
+
+m = s.mark(); s.send([b"\x0e"] * 2, delay=0.2); s.pump(1.5)
+s.kill()
+
+# Cursor keys: proven by where the next character lands, not by scraping
+# the modeline — only changed digits are repainted, so a substring search
+# of the diff finds nothing.
+content = edit("/tmp/lem-accept-cursor.txt",
+               lambda t: (t.send("abc", delay=0.15), t.pump(0.6),
+                          t.send([b"\x1b[D", b"\x1b[D"], delay=0.25), t.pump(0.6),
+                          t.send("X", delay=0.15), t.pump(0.6)))
+check(4, "cursor keys move the point", content.strip() == "aXbc", f"file={content.strip()!r}")
+s.kill()
+
+# --- 5: typing and undo, verified on disk ------------------------------
+# C-x u, not C-/: a terminal does not send what C-/ implies.
+content = edit("/tmp/lem-accept-undo.txt",
+               lambda t: (t.send("hello", delay=0.15), t.pump(0.8),
+                          [(t.send([b"\x18", b"u"], delay=0.2), t.pump(0.5)) for _ in range(6)]))
+check(5, "typing inserts and undo reverts", "hello" not in content, f"file={content.strip()!r}")
+
+# --- 6: resize reflow ----------------------------------------------------
+s = Session(60, 20); s.pump(7)
+m = s.mark(); s.winsize(100, 30); s.pump(4)
+def extent(text):
+    widest, col = 0, 1
+    for tok in re.split(r"(\x1b\[[0-9;?]*[a-zA-Z])", text):
+        if tok.startswith("\x1b["):
+            mm = re.match(r"\x1b\[(\d+);(\d+)H", tok)
+            if mm: col = int(mm.group(2))
+            continue
+        run = "".join(c for c in tok if c.isprintable())
+        if run: widest = max(widest, col + len(run) - 1); col += len(run)
+    return widest
+grown = extent(s.since(m))
+m = s.mark(); s.winsize(60, 20); s.pump(4)
+shrunk = extent(s.since(m))
+check(6, "resize reflows the layout", shrunk <= 60 < grown, f"grow->{grown}, shrink->{shrunk}")
+s.kill()
+
+# --- 7: C-x C-c exits and restores the terminal --------------------------
+s = Session(); s.pump(8)
+s.send([b"\x18", b"\x03"]); status = s.wait(8)
+restored = s.modes_restored()
+alt_left = "\x1b[?1049l" in s.plain() or "\x1b[?1049l" in s.since(0)
+check(7, "C-x C-c exits cleanly and restores the terminal",
+      status == 0 and restored, f"status={status}, ICANON+ECHO restored={restored}")
+s.kill()
+
+# --- 8: killing Lem restores the terminal --------------------------------
+# The display sees EOF and hands the terminal back; the launcher, seeing
+# Lem die of a signal, reports it and exits 1.
+s = Session(); s.pump(8)
+child = s.lem_pid()
+if child:
+    os.kill(child, signal.SIGKILL)
+status = s.wait(12)
+restored = s.modes_restored()
+exited_1 = isinstance(status, int) and os.WIFEXITED(status) and os.WEXITSTATUS(status) == 1
+reported = "Lem exited with signal" in s.plain()
+check(8, "killing Lem leaves the terminal clean and is reported",
+      exited_1 and restored and reported,
+      f"child={child}, status={status}, modes restored={restored}, reported={reported}")
+s.kill()
+
+# --- 9: multi-column list renders instead of crashing ------------------
+# C-x C-b goes through lem/multi-column-list, which reaches for the
+# *theme's* foreground when the implementation claims underline-colour
+# support. lem-default leaves that NIL on purpose, so the branch dies in
+# darken-color. Regression guard for that.
+s = Session(); s.pump(8)
+s.send([b"\x18", b"\x06"]); s.pump(1.5)
+s.send("/tmp/lem-accept-list.txt"); s.send([b"\r"]); s.pump(2)
+s.send([b"\x18", b"\x02"]); s.pump(3)          # C-x C-b
+text = s.plain()
+check(9, "C-x C-b lists buffers without crashing",
+      "not of type" not in text and "Buffer" in text,
+      "no backtrace, header present")
+s.kill()
+
+# --- 10: the terminal's own colours reach Lem ----------------------------
+# The display asks with OSC 10/11 before taking over the terminal, and the
+# relay logs what Hello carried. A terminal that answers only DA1 must
+# cost no wait: the display then knows at once that colours are not coming.
+def logged_colours():
+    log = os.path.join(ENV["LEM_HOME"], "debug.log")
+    try:
+        lines = [l for l in open(log, errors="replace") if "terminal colours" in l]
+    except FileNotFoundError:
+        return ""
+    return lines[-1].strip() if lines else ""
+
+s = Session(colors=("dddd/dddd/dddd", "fafa/fafa/fafa")); s.pump(8)
+answered = logged_colours()
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()
+s = Session(); s.pump(3)
+silent = logged_colours()
+first_frame = "Welcome to Lem" in s.plain()
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()
+check(10, "the terminal's colours reach Lem, and their absence costs no wait",
+      "#DDDDDD on #FAFAFA" in answered and "unknown on unknown" in silent and first_frame,
+      f"answered: {answered[-24:]!r}; silent: {silent[-24:]!r}; first frame within 3s: {first_frame}")
+
+# --- 11: font styles reach the terminal -----------------------------------
+# Markdown emphasis is drawn in document-italic-attribute, which
+# lem-curses marks :italic after every theme load (ADR 0015). The relay
+# carries it and the display turns it into SGR 3.
+with open("/tmp/lem-accept-italic.md", "w") as f:
+    f.write("plain *emphasis* plain\n")
+s = Session(); s.pump(8)
+m = s.mark()
+s.send([b"\x18", b"\x06"]); s.pump(1.5)           # C-x C-f
+s.send("/tmp/lem-accept-italic.md"); s.send([b"\r"]); s.pump(3)
+drawn = s.since(m)
+check(11, "Markdown emphasis is drawn in italic",
+      "\x1b[3m" in drawn and "emphasis" in s.plain(m),
+      f"SGR 3 sent: {'\x1b[3m' in drawn}")
+s.kill()
+
+# --- 12: underline styles reach the terminal, or fall back ---------------
+# A scratch LEM_HOME whose init.lisp makes Markdown links curly, as a user
+# would: by redefining the attribute, which a theme load keeps (ADR 0017).
+# Forced on, the link is drawn with SGR 4:3; forced off, as for a terminal
+# not known to draw it, with a plain SGR 4.
+home = "/tmp/lem-accept-undercurl/"
+os.makedirs(home, exist_ok=True)
+with open(os.path.join(home, "init.lisp"), "w") as f:
+    f.write("(lem:define-attribute lem:document-link-attribute\n"
+            "  (t :underline t :underline-style :curly))\n")
+with open("/tmp/lem-accept-link.md", "w") as f:
+    f.write("see [a link](https://example.com) here\n")
+def link_drawn(forced):
+    s = Session(env={"LEM_HOME": home, "LEM_CURSES_UNDERCURL": forced}); s.pump(8)
+    m = s.mark()
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)
+    s.send("/tmp/lem-accept-link.md"); s.send([b"\r"]); s.pump(3)
+    drawn = s.since(m)
+    s.kill()
+    return drawn
+curly, straight = link_drawn("1"), link_drawn("0")
+check(12, "a curly underline reaches the terminal, and falls back to straight",
+      "\x1b[4:3m" in curly and "\x1b[4:" not in straight and "\x1b[4m" in straight,
+      f"curly: {'\x1b[4:3m' in curly}; fallback straight: {'\x1b[4m' in straight and '\x1b[4:' not in straight}")
+
+# --- 13: web addresses become terminal hyperlinks, or stay text ----------
+# ADR 0018. A bare address and a Markdown link's; forced off, as for a
+# terminal not known to make hyperlinks, no OSC 8 at all.
+with open("/tmp/lem-accept-links.md", "w") as f:
+    f.write("plain https://example.com/plain here\nsee [a link](https://example.com/md) here\n")
+def links_drawn(forced):
+    s = Session(env={"LEM_CURSES_HYPERLINKS": forced}); s.pump(8)
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)
+    m = s.mark()
+    s.send("/tmp/lem-accept-links.md"); s.send([b"\r"]); s.pump(3)
+    drawn = s.since(m)
+    s.kill()
+    return re.findall(r"\x1b\]8;id=[0-9a-f]+;([^\x1b]*)\x1b\\", drawn), "\x1b]8;" in drawn
+(on, _), (_, off) = links_drawn("1"), links_drawn("0")
+check(13, "web addresses reach the terminal as hyperlinks, and only when supported",
+      "https://example.com/plain" in on and "https://example.com/md" in on and not off,
+      f"linked: {sorted(set(on))}; sent when off: {off}")
+
+# --- 14: the OS agent's clipboard (ADR 0019) ---------------------------
+# A file stands in for the desktop's clipboard (LEM_OS_AGENT_CLIPBOARD_FILE),
+# so this runs with no display server. Yanking inserts what the agent says
+# is on the clipboard; copying puts text there. XDG_RUNTIME_DIR points at a
+# scratch directory so that the session's socket directory can be seen to
+# go away.
+runtime = tempfile.mkdtemp(prefix="lem-accept-runtime-")
+board = os.path.join(runtime, "clipboard.txt")
+with open(board, "w") as f:
+    f.write("from-the-agent")
+path = "/tmp/lem-accept-agent.txt"
+if os.path.exists(path): os.remove(path)
+s = Session(env={"LEM_OS_AGENT_CLIPBOARD_FILE": board, "XDG_RUNTIME_DIR": runtime}); s.pump(8)
+s.send([b"\x18", b"\x06"]); s.pump(1.5)                              # C-x C-f
+s.send(path); s.send([b"\r"]); s.pump(2)
+s.send([b"\x19"]); s.pump(1)                                         # C-y
+s.send([b"\r"]); s.send("copied", delay=0.15); s.pump(0.6)
+s.send([b"\x01", b"\x00", b"\x05", b"\x1bw"], delay=0.25); s.pump(1)  # C-a C-SPC C-e M-w
+s.send([b"\x18", b"\x13"]); s.pump(2)                                # C-x C-s
+s.send([b"\x18", b"\x03"]); s.wait(8); s.kill()                      # C-x C-c
+content = open(path).read() if os.path.exists(path) else "<no file>"
+copied = open(board).read()
+sessions = os.path.join(runtime, "lem-curses")
+left = os.listdir(sessions) if os.path.isdir(sessions) else []
+shutil.rmtree(runtime, ignore_errors=True)
+check(14, "the OS agent's clipboard is Lem's, and its socket is cleaned up",
+      content.startswith("from-the-agent\ncopied") and copied == "copied" and left == [],
+      f"file={content!r}, clipboard={copied!r}, left behind={left}")
+
+# --- 15: no OS agent ----------------------------------------------------
+# The agent is optional: when it cannot start, the editor runs as before
+# and the launcher says why once the terminal is back.
+s = Session(env={"LEM_CURSES_OS_AGENT": "/nonexistent/lem-os-agent"}); s.pump(8)
+started = s.plain()
+s.send([b"\x18", b"\x03"]); status = s.wait(8); s.kill()
+told = "OS agent" in s.plain()
+check(15, "without an OS agent the editor runs, and the launcher says why",
+      "Welcome to Lem" in started and told and status == 0,
+      f"started={'Welcome to Lem' in started}, warned={told}, status={status}")
+
+# --- 16: copying with OSC 52 when there is no agent (ADR 0020) ----------
+# With no agent to own the clipboard, a copy goes to the terminal as OSC 52
+# when the terminal takes it, and nowhere when it does not. Forced both ways,
+# since the pty's TERM names no terminal that is known to.
+import base64
+want = "\x1b]52;c;" + base64.b64encode(b"copied").decode() + "\x1b\\"
+sent, saved = {}, {}
+for forced in ("1", "0"):
+    path = f"/tmp/lem-accept-osc52-{forced}.txt"
+    if os.path.exists(path): os.remove(path)
+    s = Session(env={"LEM_CURSES_OS_AGENT": "/nonexistent/lem-os-agent",
+                     "LEM_CURSES_OSC52": forced}); s.pump(8)
+    s.send([b"\x18", b"\x06"]); s.pump(1.5)                              # C-x C-f
+    s.send(path); s.send([b"\r"]); s.pump(2)
+    s.send("copied", delay=0.15); s.pump(0.6)
+    m = s.mark()
+    s.send([b"\x01", b"\x00", b"\x05", b"\x1bw"], delay=0.25); s.pump(1)  # C-a C-SPC C-e M-w
+    sent[forced] = s.since(m)
+    # The copy happened either way: it is in the kill ring, so C-y doubles
+    # the line. Without this, "no OSC 52 when off" could pass vacuously.
+    s.send([b"\x05", b"\x19"], delay=0.2); s.pump(0.8)                   # C-e C-y
+    s.send([b"\x18", b"\x13"]); s.pump(2)                                # C-x C-s
+    saved[forced] = open(path).read() if os.path.exists(path) else "<no file>"
+    s.kill()
+check(16, "with no agent, a copy reaches the terminal as OSC 52, and only when it takes it",
+      want in sent["1"] and "\x1b]52;" not in sent["0"]
+      and all(text.startswith("copiedcopied") for text in saved.values()),
+      f"sent when on: {want in sent['1']}; sent when off: {chr(27) + ']52;' in sent['0']}; "
+      f"copied both times: {sorted(saved.values())}")
+
+# --- 17: a stuck Lem can be asked for its backtraces -------------------
+# SIGUSR1 makes Lem write every thread's backtrace to its own session's
+# log, so a stall can be looked at while it happens, without a debugger.
+# XDG_STATE_HOME is a scratch directory so that log can be found.
+import glob
+state = tempfile.mkdtemp(prefix="lem-accept-state-")
+s = Session(env={"XDG_STATE_HOME": state}); s.pump(8)
+lem = s.lem_pid()
+if lem: os.kill(lem, signal.SIGUSR1)
+s.pump(3)
+logs = glob.glob(os.path.join(state, "lem-curses", "lem-*.log"))
+text = open(logs[0]).read() if len(logs) == 1 else ""
+s.send([b"\x18", b"\x03"]); status = s.wait(8); s.kill()
+shutil.rmtree(state, ignore_errors=True)
+editor = "=== thread editor ===" in text and "\n0: " in text
+check(17, "SIGUSR1 writes every thread's backtrace to the session's own log",
+      lem is not None and len(logs) == 1 and editor and status == 0,
+      f"logs={[os.path.basename(l) for l in logs]}, editor backtrace={editor}, status={status}")
+
+print()
+failed = [r for r in results if not r[2]]
+print(f"{len(results) - len(failed)}/{len(results)} acceptance checks passed")
+sys.exit(1 if failed else 0)

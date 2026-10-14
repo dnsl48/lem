@@ -1,0 +1,97 @@
+// The protocol between Lem and the OS agent: lem-os-agent in Lisp on the
+// editor side, the lem-os-agent process on the other.
+//
+// Decisions behind it, in frontends/curses/docs/adr/:
+//   0019  an OS agent, and a link per peer
+// It follows display.proto's conventions (ADR 0011, 0013): every message
+// carries its sender's seq and time; a reply names its request by seq.
+//
+// Transport: a local (Unix domain) stream socket. The launcher picks its
+// path, in a directory private to the session, and gives it to the agent
+// as `--socket PATH` and to Lem as LEM_OS_AGENT_SOCKET. Lem connects, so
+// Lem speaks first: Hello, answered by Welcome. Each message is one
+// ToAgent or ToEditor, framed as on the display link: a varint byte
+// length, then the message.
+//
+// Evolution: never renumber or reuse a field; `reserved` what is removed.
+// An incompatible change is package lem.os.v2, not an edit to v1. A new
+// feature comes with a capability, so that an older agent says it lacks it.
+
+syntax = "proto3";
+
+package lem.os.v1;
+
+// ---------------------------------------------------------------------------
+// Envelopes
+
+// Everything Lem sends.
+message ToAgent {
+  // 1 for Lem's first message on this connection, one more for each after.
+  uint64 seq = 1;
+  // Microseconds on Lem's monotonic clock since it started.
+  uint64 time_us = 2;
+
+  oneof message {
+    Hello hello = 3;
+    ClipboardRequest clipboard_request = 4;
+    SetClipboard set_clipboard = 5;
+  }
+}
+
+// Everything the agent sends.
+message ToEditor {
+  // The agent's own numbering, as ToAgent.seq.
+  uint64 seq = 1;
+  // Microseconds on the agent's monotonic clock since it started.
+  uint64 time_us = 2;
+
+  oneof message {
+    Welcome welcome = 3;
+    ClipboardReply clipboard_reply = 4;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handshake
+
+message Hello {
+  // Revision of this v1 schema Lem was built against; never 0.
+  uint32 protocol_version = 1;
+  // The session's id, LEM_SESSION_ID: a UUIDv7 in canonical text form,
+  // made by the launcher. Empty when Lem was started without one.
+  string session_id = 2;
+}
+
+message Welcome {
+  // The agent's revision of this schema.
+  uint32 protocol_version = 1;
+  // Hello.session_id, echoed.
+  string session_id = 2;
+  // What this agent can do on this desktop. Absent means nothing.
+  Capabilities capabilities = 3;
+  // The Hello's ToAgent.seq.
+  uint64 reply_to = 4;
+}
+
+// What the agent offers. False for anything this desktop lacks: no
+// display server, no clipboard.
+message Capabilities {
+  bool clipboard = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard. Lem asks when it yanks and waits briefly (0.1 s) for the
+// answer; the reply names the request by its seq.
+
+message ClipboardRequest {}
+
+message ClipboardReply {
+  // The ClipboardRequest's ToAgent.seq.
+  uint64 reply_to = 1;
+  // Absent when there is nothing readable on the clipboard.
+  optional string text = 2;
+}
+
+message SetClipboard {
+  string text = 1;
+}
